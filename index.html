@@ -71,6 +71,15 @@
 <h2 id="dropServiceTitle">代发售后</h2>
 <form id="dropServiceForm">
   <label>售后类型<select name="kind" required><option value="">请选择</option><option value="exchange">换货</option><option value="return">退货</option></select></label>
+  <div id="dropExchangeFields" class="fields filters" hidden>
+    <label class="wide">换货单号<input name="exchangeTracking" maxlength="100" autocapitalize="off" spellcheck="false" disabled></label>
+    <label class="wide">是否更换配置<select name="changeSpec" disabled><option value="no">否，沿用原配置</option><option value="yes">是，选择新配置</option></select></label>
+    <div id="dropExchangeSpecs" class="fields wide" hidden>
+      <label>网络<select name="network" disabled><option value="">请选择网络</option><option>Wi-Fi</option><option>插卡</option><option>无锁Wi-Fi</option><option>无锁插卡</option></select></label>
+<label>指纹<select name="fingerprint" disabled><option value="">请选择指纹</option><option>指纹</option><option>无指纹</option></select></label>
+<label>内存<select name="memory" disabled><option value="">请选择内存</option><option value="32">32 GB</option><option value="128">128 GB</option></select></label>
+    </div>
+  </div>
   <output id="dropServiceError" role="alert"></output>
   <div class="actions"><button class="primary">保存</button><button id="cancelDropService" type="button">取消</button></div>
 </form></dialog>
@@ -711,14 +720,17 @@ tab(page);
     const filter = $('dropFilter').value;
     const orders = [...dropState.orders].sort((a,b) => b.date.localeCompare(a.date));
     const filtered = orders.filter(order => (!filter || filter === order.status) &&
-      (!query || (order.tracking ?? '').toLowerCase().includes(query)));
+      (!query || [order.tracking,order.exchange?.tracking].some(number => (number ?? '').toLowerCase().includes(query))));
     $('newDropOrder').disabled = dropStorageError;
     $('dropRows').innerHTML = dropStorageError ? '<p class="empty">本机代发数据无法读取。</p>' :
       filtered.map(order => {
         const move = nextStatus[order.status];
         return `<article><div class="row"><h3>${escape(order.product)}</h3><div class="record-tags"><span class="tag">${statusNames[order.status]}</span>${Object.hasOwn(serviceNames,order.afterSales) ? '<span class="tag drop-service-tag">售后</span>' : ''}</div></div>
           <p class="muted">${escape(order.date)} · ${escape(order.supplier)}</p>
-          ${order.tracking ? `<p>快递单号 ${escape(order.tracking)}</p>` : ''}
+          ${order.exchange
+            ? `<p>原单号 ${escape(order.tracking || '—')}</p><p>换货单号 ${escape(order.exchange.tracking)}</p>
+               <p>换货配置 ${escape(replacementSpec(order))}</p>`
+            : order.tracking ? `<p>快递单号 ${escape(order.tracking)}</p>` : ''}
           <div class="actions">
             <button data-drop-action="detail" data-id="${escape(order.id)}">详情</button>
             <button data-drop-action="edit" data-id="${escape(order.id)}">编辑</button>
@@ -775,6 +787,31 @@ tab(page);
   $('cancelDropOrder').onclick = () => $('dropEditor').close();
   $('closeDropDetail').onclick = () => $('dropDetail').close();
 
+  function describeSpec({network,fingerprint,memory}) {
+    return `${network} · ${fingerprint} · ${memory} GB`;
+  }
+
+  function replacementSpec(order) {
+    return order.exchange.spec ? describeSpec(order.exchange.spec) : '沿用原配置';
+  }
+
+  function syncExchangeFields() {
+    const fields = $('dropServiceForm').elements;
+    const exchange = fields.namedItem('kind').value === 'exchange';
+    const changeSpec = exchange && fields.namedItem('changeSpec').value === 'yes';
+    $('dropExchangeFields').hidden = !exchange;
+    $('dropExchangeSpecs').hidden = !changeSpec;
+    fields.namedItem('changeSpec').disabled = !exchange;
+    for (const [name,enabled] of [
+      ['exchangeTracking',exchange],['network',changeSpec],['fingerprint',changeSpec],['memory',changeSpec]
+    ]) {
+      const input = fields.namedItem(name);
+      input.disabled = !enabled;
+      input.required = enabled;
+    }
+  }
+
+  $('dropServiceForm').onchange = syncExchangeFields;
   $('cancelDropService').onclick = () => $('dropService').close();
   $('dropServiceForm').onsubmit = event => {
     event.preventDefault();
@@ -783,8 +820,22 @@ tab(page);
     try {
       if (!order) throw Error('这笔订单已不存在。');
       if (!Object.hasOwn(serviceNames,kind)) throw Error('请选择换货或退货。');
-      if (order.afterSales !== kind) {
-        const updated = {...order,afterSales:kind};
+      const updated = {...order,afterSales:kind};
+      if (kind === 'exchange') {
+        const fields = event.target.elements;
+        const tracking = fields.namedItem('exchangeTracking').value.trim();
+        if (!tracking) throw Error('请填写换货单号。');
+        if (tracking.toLowerCase() === (order.tracking ?? '').trim().toLowerCase()) {
+          throw Error('换货单号需与原单号不同。');
+        }
+        let spec = null;
+        if (fields.namedItem('changeSpec').value === 'yes') {
+          spec = Object.fromEntries(['network','fingerprint','memory'].map(name => [name,fields.namedItem(name).value]));
+          if (!Object.values(spec).every(Boolean)) throw Error('请选择完整的换货配置。');
+        }
+        updated.exchange = {tracking,spec};
+      }
+      if (order.afterSales !== kind || JSON.stringify(order.exchange) !== JSON.stringify(updated.exchange)) {
         saveDropship(dropState.orders.map(o => o.id === serviceId ? updated : o),'售后 · '+serviceNames[kind],updated);
       }
       $('dropService').close();
@@ -804,7 +855,7 @@ tab(page);
       if (editedId && !previous) throw Error('这笔订单已不存在。');
       const order = {
         ...previous,...values,id:editedId || crypto.randomUUID(),
-        product:`${values.network} · ${values.fingerprint} · ${values.memory} GB`,
+        product:describeSpec(values),
         cost:Math.round(Number(values.cost)*100),price:Math.round(Number(values.price)*100)
       };
       const orders = editedId ? dropState.orders.map(o => o.id === editedId ? order : o) : [order,...dropState.orders];
@@ -824,14 +875,23 @@ tab(page);
     if (command === 'edit') { openDropForm(order); return; }
     if (command === 'service') {
       serviceId = order.id;
-      $('dropServiceForm').elements.namedItem('kind').value = order.afterSales ?? '';
+      const form = $('dropServiceForm');
+      form.reset();
+      form.elements.namedItem('kind').value = order.afterSales ?? '';
+      form.elements.namedItem('exchangeTracking').value = order.exchange?.tracking ?? '';
+      form.elements.namedItem('changeSpec').value = order.exchange?.spec ? 'yes' : 'no';
+      for (const name of ['network','fingerprint','memory']) {
+        form.elements.namedItem(name).value = order.exchange?.spec?.[name] ?? order[name] ?? '';
+      }
+      syncExchangeFields();
       $('dropServiceError').textContent = '';
       $('dropService').showModal();
       return;
     }
     if (command === 'detail') {
-      const fields = [['商品规格',order.product],['代发渠道',order.supplier],
-        ['下单日期',order.date],['状态',statusNames[order.status]],['售后类型',Object.hasOwn(serviceNames,order.afterSales) ? serviceNames[order.afterSales] : ''],['快递单号',order.tracking],
+      const fields = [[order.exchange ? '原配置' : '商品规格',order.product],['代发渠道',order.supplier],
+        ['下单日期',order.date],['状态',statusNames[order.status]],['售后类型',Object.hasOwn(serviceNames,order.afterSales) ? serviceNames[order.afterSales] : ''],[order.exchange ? '原单号' : '快递单号',order.tracking],
+        ...(order.exchange ? [['换货单号',order.exchange.tracking],['换货配置',replacementSpec(order)]] : []),
         ['成本',money(order.cost)],['售价',money(order.price)],['单笔利润',money(order.price-order.cost)],['备注',order.note]];
       $('dropDetailRows').innerHTML = fields.map(([label,value]) =>
         `<dt>${label}</dt><dd>${escape(value || '—')}</dd>`).join('');
