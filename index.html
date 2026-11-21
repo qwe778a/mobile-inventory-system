@@ -42,17 +42,12 @@
 .payment-note{white-space:pre-wrap}
 .payment-positive{color:#176239}
 .payment-negative{color:#a21b1b}
-.payment-state{display:inline-block;margin-top:4px;background:#e3f3e8}
+.payment-state{display:inline-block;margin-top:4px;min-height:44px;background:#e3f3e8}
 .payment-state.payment-negative{background:#ffe6e5}
 #paymentList .actions{margin-top:10px}
 #paymentList .row{align-items:start}
 #paymentList strong{white-space:nowrap}
 #paymentList h3{min-width:0}
-#paymentParts{display:grid;gap:8px}
-.payment-part{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
-#paymentMerge{margin-top:16px}
-#paymentMerge summary{cursor:pointer;color:var(--blue)}
-#paymentMerge label{margin-top:10px}
 </style>
 <main id="hub" class="hub">
 <h1 tabindex="-1">闲鱼</h1>
@@ -129,20 +124,9 @@
 <dialog id="paymentChange" aria-labelledby="paymentChangeTitle">
   <h2 id="paymentChangeTitle"></h2>
   <form id="paymentChangeForm">
-    <div class="fields" id="paymentEditFields">
-      <label>款项状态<select name="status"><option value="regular">普通货款</option><option value="unpaid">未支付（我需付款）</option></select></label>
-      <label class="wide">备注<textarea name="note" rows="3" maxlength="300"></textarea></label>
-    </div>
-    <div id="paymentSplitFields" hidden>
-      <p id="paymentOriginalAmount"></p>
-      <div id="paymentParts"></div>
-      <div class="actions"><button id="paymentAddPart" type="button">＋ 添加一段</button></div>
-      <p id="paymentPartsTotal" role="status"></p>
-      <details id="paymentMerge" hidden>
-        <summary>合并以前拆开的款项</summary>
-        <label>选择另一条款项<select id="paymentMergeTarget"></select></label>
-        <div class="actions"><button id="paymentMergeConfirm" type="button">合并成一条</button></div>
-      </details>
+    <div class="fields">
+      <label class="wide" id="paymentStatusField">款项状态<select name="status"><option value="regular">普通货款</option><option value="unpaid">未支付（我需付款）</option></select></label>
+      <label class="wide" id="paymentNoteField">备注<textarea name="note" rows="3" maxlength="300"></textarea></label>
     </div>
     <output id="paymentChangeError" role="alert"></output>
     <div class="actions"><button class="primary" type="submit">保存</button><button type="button" id="paymentChangeCancel">取消</button></div>
@@ -1048,13 +1032,11 @@ tab(page);
       !record || typeof record.name !== 'string' || !record.name.trim() || !validPaymentAmount(record.amount) ||
       (record.id !== undefined && (typeof record.id !== 'string' || !/^[\w-]+$/.test(record.id))) ||
       (record.note !== undefined && typeof record.note !== 'string') ||
-      (record.parts !== undefined && (!Array.isArray(record.parts) ||
-        !record.parts.every(validPaymentAmount))) ||
       (record.status !== undefined && !['regular','unpaid'].includes(record.status)))) {
       throw Error('货款记录格式无效。');
     }
     return records.map((record,index) => ({
-      ...record, id:record.id ?? `legacy-${index}`, status:record.status ?? 'regular', note:record.note ?? '', parts:record.parts ?? []
+      ...record, id:record.id ?? `legacy-${index}`, status:record.status ?? 'regular', note:record.note ?? ''
     }));
   }
 
@@ -1074,10 +1056,10 @@ tab(page);
         const color = unpaid ? 'payment-negative' : 'payment-positive';
         return `<article><div class="row"><h3>${escape(record.name)}</h3>
           <strong class="${color}">${unpaid ? '−' : '+'}${money(record.amount)}</strong></div>
-          <span class="tag payment-state ${color}">${unpaid ? '未支付' : '普通货款'}</span>
+          <button type="button" class="tag payment-state ${color}" data-payment-action="status" data-payment-id="${record.id}" aria-label="修改款项状态：${unpaid ? '未支付' : '普通货款'}">${unpaid ? '未支付' : '普通货款'}</button>
           ${record.note ? `<p class="muted payment-note">${escape(record.note)}</p>` : ''}
-          <div class="actions"><button type="button" data-payment-action="edit" data-payment-id="${record.id}">编辑</button>
-          <button type="button" data-payment-action="detail" data-payment-id="${record.id}">详情</button></div></article>`;
+          <div class="actions"><button type="button" data-payment-action="note" data-payment-id="${record.id}">备注</button>
+          <button type="button" class="danger" data-payment-action="delete" data-payment-id="${record.id}">删除</button></div></article>`;
       }).join('') || '<p class="empty">暂无货款记录。</p>';
       showPaymentError('');
     } catch {
@@ -1112,137 +1094,63 @@ tab(page);
     renderPayments();
   };
 
-  function paymentPartInputs() {
-    return Array.from($('paymentParts').querySelectorAll('input'));
-  }
-
-  function updatePaymentPartsTotal() {
-    const inputs = paymentPartInputs().filter(input => input.value !== '');
-    const parts = inputs.map(readCents);
-    const output = $('paymentPartsTotal');
-    if (!inputs.every(input => input.validity.valid) || !parts.every(validPaymentAmount)) {
-      output.className = 'payment-negative';
-      output.textContent = '每段金额须大于零，最多保留两位小数。';
-      return;
-    }
-    const sum = parts.reduce((total,amount) => total + amount,0);
-    const difference = paymentSelection.record.amount - sum;
-    const result = difference === 0 ? '与原金额一致'
-      : difference > 0 ? '还差 ' + money(difference) : '超出 ' + money(-difference);
-    output.className = difference === 0 ? 'payment-positive' : 'payment-negative';
-    output.textContent = `明细合计 ${money(sum)} · ${result}`;
-    return parts;
-  }
-
-  function addPaymentPart(amount) {
-    const row = document.createElement('div');
-    row.className = 'payment-part';
-    row.innerHTML = '<label>分段金额（元）<input type="number" inputmode="decimal" min="0.01" max="9999999.99" step="0.01"></label>' +
-      '<button type="button">移除</button>';
-    const input = row.querySelector('input');
-    input.value = amount === undefined ? '' : (amount/100).toFixed(2);
-    row.querySelector('button').onclick = () => {
-      row.remove();
-      updatePaymentPartsTotal();
-    };
-    $('paymentParts').append(row);
-    return input;
-  }
-
-  function paymentMergeChoices(records,record) {
-    if (record.parts.length) return [];
-    return records.filter(other => other.id !== record.id && !other.parts.length &&
-      other.name === record.name && other.status === record.status &&
-      (!other.note || !record.note || other.note === record.note) &&
-      validPaymentAmount(record.amount + other.amount));
-  }
-
   $('paymentList').onclick = event => {
     const button = event.target.closest('[data-payment-action]');
     if (!button) return;
     try {
       const raw = localStorage.getItem(paymentKey);
-      const records = readPayments(raw);
-      const record = records.find(entry => entry.id === button.dataset.paymentId);
+      const record = readPayments(raw).find(entry => entry.id === button.dataset.paymentId);
       if (!record) { renderPayments(); return; }
-      const detail = button.dataset.paymentAction === 'detail';
-      paymentSelection = {raw,record,detail};
+      const action = button.dataset.paymentAction;
+      const changeStatus = action === 'status';
+      paymentSelection = {raw,record,action};
+      if (action === 'delete') {
+        if (confirm(`确认删除「${record.name}」${money(record.amount)}？`)) savePaymentChange();
+        return;
+      }
       const fields = paymentChangeForm.elements;
-      paymentChangeForm.reset();
       fields.note.value = record.note;
       fields.status.value = record.status;
-      $('paymentEditFields').hidden = detail;
-      $('paymentSplitFields').hidden = !detail;
+      $('paymentNoteField').hidden = changeStatus;
+      $('paymentStatusField').hidden = !changeStatus;
       $('paymentChangeError').textContent = '';
-      $('paymentChangeTitle').textContent = detail ? record.name + ' · 详情' : '编辑备注和状态';
-      $('paymentParts').replaceChildren();
-      if (detail) {
-        $('paymentOriginalAmount').textContent = '原金额 ' + money(record.amount);
-        (record.parts.length ? record.parts : [undefined]).forEach(addPaymentPart);
-        updatePaymentPartsTotal();
-        const choices = paymentMergeChoices(records,record);
-        $('paymentMerge').hidden = !choices.length;
-        $('paymentMerge').open = false;
-        $('paymentMergeTarget').replaceChildren(new Option('请选择',''),...choices.map(other =>
-          new Option(`${other.name} · ${money(other.amount)}${other.note ? ' · ' + other.note : ''}`,other.id)));
-      }
+      $('paymentChangeTitle').textContent = changeStatus ? '修改款项状态' : '备注';
+      const field = changeStatus ? fields.status : fields.note;
       $('paymentChange').showModal();
+      field.focus();
     } catch {
       showPaymentError('无法读取货款记录，请刷新后重试。');
     }
   };
-  $('paymentParts').oninput = updatePaymentPartsTotal;
-  $('paymentAddPart').onclick = () => addPaymentPart().focus();
   $('paymentChangeCancel').onclick = () => $('paymentChange').close();
+  paymentChangeForm.onsubmit = event => {
+    event.preventDefault();
+    savePaymentChange();
+  };
 
-  function writePaymentChange(change) {
-    const {raw,record} = paymentSelection;
+  function savePaymentChange() {
+    const {raw,record,action} = paymentSelection;
+    const remove = action === 'delete';
+    const showError = remove ? showPaymentError : message => { $('paymentChangeError').textContent = message; };
     try {
       if (localStorage.getItem(paymentKey) !== raw) {
-        $('paymentChangeError').textContent = '记录已在另一窗口更新，请取消后重新打开。';
+        showError('记录已在另一窗口更新，请刷新后重试。');
         return;
       }
       const records = readPayments(raw);
       const index = records.findIndex(entry => entry.id === record.id);
-      change(records,index,record);
+      const fields = paymentChangeForm.elements;
+      if (remove) records.splice(index,1);
+      else if (action === 'status') records[index].status = fields.status.value;
+      else records[index].note = fields.note.value.trim();
       localStorage.setItem(paymentKey,JSON.stringify(records));
     } catch {
-      $('paymentChangeError').textContent = '无法保存货款，请检查浏览器存储后重试。';
+      showError('无法保存货款，请检查浏览器存储后重试。');
       return;
     }
-    $('paymentChange').close();
+    if (!remove) $('paymentChange').close();
     renderPayments();
   }
-
-  paymentChangeForm.onsubmit = event => {
-    event.preventDefault();
-    const fields = paymentChangeForm.elements;
-    if (paymentSelection.detail) {
-      const parts = updatePaymentPartsTotal();
-      if (!parts) return;
-      writePaymentChange((records,index,record) => { records[index] = {...record,parts}; });
-    } else {
-      writePaymentChange((records,index,record) => {
-        records[index] = {...record,status:fields.status.value,note:fields.note.value.trim()};
-      });
-    }
-  };
-
-  $('paymentMergeConfirm').onclick = () => {
-    const {raw,record} = paymentSelection;
-    const target = paymentMergeChoices(readPayments(raw),record)
-      .find(other => other.id === $('paymentMergeTarget').value);
-    if (!target) {
-      $('paymentChangeError').textContent = '请先选择要合并的另一条款项。';
-      return;
-    }
-    const amount = record.amount + target.amount;
-    if (!confirm(`将两条「${record.name}」合为一条 ${money(amount)}，原金额保留在详情里。确认合并？`)) return;
-    writePaymentChange((records,index) => {
-      records[index] = {...record, amount, note:record.note || target.note, parts:[record.amount,target.amount]};
-      records.splice(records.findIndex(entry => entry.id === target.id),1);
-    });
-  };
   window.addEventListener('storage',event => {
     if (!$('payments').hidden && (event.key === paymentKey || event.key === null)) renderPayments();
   });
