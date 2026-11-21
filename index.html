@@ -34,6 +34,13 @@
 .expense-day small{font-size:12px;line-height:1.15;font-weight:600;color:inherit;overflow-wrap:anywhere;max-width:100%}
 #expenseReadError,#expenseError{color:#9a301e}
 #expenseEditor label{margin-top:12px}
+#payments{max-width:560px}
+#paymentForm{margin:0}
+#paymentForm label{min-width:0}
+#paymentError{color:#9a301e}
+#paymentList .row{align-items:start}
+#paymentList strong{white-space:nowrap}
+#paymentList h3{min-width:0}
 </style>
 <main id="hub" class="hub">
 <h1 tabindex="-1">闲鱼</h1>
@@ -41,6 +48,7 @@
   <button class="hub-option" id="openInventory"><span><strong>拍机堂</strong><small>管理库存、入库、出库与售后</small></span><span class="arrow" aria-hidden="true">›</span></button>
   <button class="hub-option" id="openDropship"><span><strong>代发</strong><small>管理代发订单、发货状态与利润</small></span><span class="arrow" aria-hidden="true">›</span></button>
   <button class="hub-option" id="openExpenses" type="button"><span><strong>超擦支出</strong><small>记录每日金额，查看每月总支出</small></span><span class="arrow" aria-hidden="true">›</span></button>
+  <button class="hub-option" id="openPayments" type="button"><span><strong>货款明细</strong><small>录入货款，查看明细和合计</small></span><span class="arrow" aria-hidden="true">›</span></button>
 </div>
 </main>
 <main id="inventory" hidden>
@@ -82,6 +90,28 @@
   <div class="expense-days" id="expenseDays"></div>
 </section>
 <p id="expenseReadError" role="alert" hidden></p>
+</main>
+<main id="payments" hidden>
+<header><div class="inventory-title"><button type="button" data-home>首页</button><h1 tabindex="-1">货款明细</h1></div></header>
+<section class="hero expense-summary" aria-label="货款汇总">
+  <small>货款合计</small><strong id="paymentTotal" aria-live="polite"></strong>
+</section>
+<article>
+  <h2>录入货款</h2>
+  <form id="paymentForm">
+    <div class="fields" style="margin:12px 0">
+      <label class="wide">款项名称<input name="paymentName" type="text" maxlength="80" required></label>
+      <label>货款日期<input name="paymentDate" type="date" required></label>
+      <label>金额（元）<input name="paymentAmount" type="number" inputmode="decimal" min="0.01" max="9999999.99" step="0.01" required></label>
+    </div>
+    <button class="primary" type="submit">保存货款</button>
+  </form>
+</article>
+<p id="paymentError" role="alert" hidden></p>
+<section aria-labelledby="paymentHeading">
+  <h2 id="paymentHeading">已录入货款</h2>
+  <div id="paymentList"></div>
+</section>
 </main>
 <dialog id="expenseEditor" aria-labelledby="expenseDateHeading">
 <h2 id="expenseDateHeading"></h2>
@@ -784,7 +814,7 @@ tab(page);
   }
 
   function showModule(id) {
-    for (const panel of ['hub','inventory','dropship','expenses']) $(panel).hidden = panel !== id;
+    for (const panel of ['hub','inventory','dropship','expenses','payments']) $(panel).hidden = panel !== id;
     $('inventoryNav').hidden = id !== 'inventory';
     if (id === 'dropship') setSidebar(false);
     window.scrollTo(0,0);
@@ -967,6 +997,78 @@ tab(page);
   };
   window.addEventListener('storage',event => {
     if (!$('expenses').hidden && (event.key === expenseKey || event.key === null)) renderExpenses();
+  });
+
+  const paymentKey = 'goods-payments-v1';
+  const paymentForm = $('paymentForm');
+  const paymentError = $('paymentError');
+
+  function readPayments() {
+    const records = JSON.parse(localStorage.getItem(paymentKey) ?? '[]');
+    if (!Array.isArray(records) || records.some(record =>
+      !record || typeof record.name !== 'string' || !record.name.trim() ||
+      !validPaymentDate(record.date) || !Number.isSafeInteger(record.amount) ||
+      record.amount < 1 || record.amount > 999999999)) {
+      throw Error('货款记录格式无效。');
+    }
+    return records;
+  }
+
+  function validPaymentDate(date) {
+    return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+      Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0,10) === date;
+  }
+
+  function showPaymentError(message) {
+    paymentError.textContent = message;
+    paymentError.hidden = !message;
+  }
+
+  function renderPayments() {
+    try {
+      const records = readPayments();
+      const total = records.reduce((sum,record) => sum + record.amount,0);
+      $('paymentTotal').textContent = money(total);
+      $('paymentList').innerHTML = records.reverse().sort((a,b) => b.date.localeCompare(a.date)).map(record =>
+        `<article><div class="row"><h3>${escape(record.name)}</h3><strong>${money(record.amount)}</strong></div>
+        <time class="muted" datetime="${record.date}">${record.date}</time></article>`
+      ).join('') || '<p class="empty">暂无货款记录。</p>';
+      showPaymentError('');
+    } catch {
+      $('paymentTotal').textContent = '—';
+      $('paymentList').replaceChildren();
+      showPaymentError('无法读取本机货款记录，请刷新后重试。');
+    }
+  }
+
+  $('openPayments').onclick = () => {
+    if (!paymentForm.elements.paymentDate.value) paymentForm.elements.paymentDate.value = today();
+    renderPayments();
+    showModule('payments');
+  };
+  paymentForm.onsubmit = event => {
+    event.preventDefault();
+    const name = paymentForm.elements.paymentName.value.trim();
+    const date = paymentForm.elements.paymentDate.value;
+    const amount = Math.round(paymentForm.elements.paymentAmount.valueAsNumber * 100);
+    if (!name || !validPaymentDate(date) || !Number.isSafeInteger(amount) || amount < 1 || amount > 999999999) {
+      showPaymentError('请填写款项名称、有效日期和大于零的金额。');
+      return;
+    }
+    try {
+      const records = readPayments();
+      records.push({name,date,amount});
+      localStorage.setItem(paymentKey,JSON.stringify(records));
+    } catch {
+      showPaymentError('无法保存货款，请检查浏览器存储后重试。');
+      return;
+    }
+    paymentForm.reset();
+    paymentForm.elements.paymentDate.value = date;
+    renderPayments();
+  };
+  window.addEventListener('storage',event => {
+    if (!$('payments').hidden && (event.key === paymentKey || event.key === null)) renderPayments();
   });
 
   $('openInventory').onclick = () => showModule('inventory');
