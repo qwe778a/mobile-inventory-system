@@ -6,13 +6,14 @@
 <style>
 :root{font:16px system-ui,-apple-system,sans-serif;color:#172d29;background:#f4f6f2;--green:#124d40;--line:#dce5dd}
 *{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eee7;color:var(--green);font-weight:650}button.primary{background:var(--green);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#536961}.hero{margin:22px 0;background:var(--green);color:white;border-radius:22px;padding:20px}.hero small{color:#d3e9df}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eee7;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#dcebe1}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102d25aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
+.scan-field{display:grid;gap:6px;align-content:start;min-width:0}.scan-field button{justify-self:start}#scanVideo{width:100%;max-height:42dvh;object-fit:contain;background:#172d29;border-radius:12px}
 </style>
 <main>
 <header><h1>手机进销存</h1><button id="backup">数据备份</button></header>
 <section class="hero" aria-label="统计"><small id="summaryTitle"></small><div class="metrics" id="metrics"></div></section>
 <div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button></div>
 <div class="filters">
-<label class="wide">搜索<input id="query" type="search" placeholder="型号、IMEI、序列号、渠道或单号"></label>
+<label class="wide">搜索<input id="query" type="search" placeholder="型号、IMEI、物品编号、渠道或单号"></label>
 <label>开始日期<input id="from" type="date"></label>
 <label>结束日期<input id="to" type="date"></label>
 <label>状态<select id="filter"></select></label>
@@ -22,6 +23,7 @@
 </main>
 <nav aria-label="功能"><div id="tabs"></div></nav>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
+<dialog id="scanPanel"><h2 id="scanTitle"></h2><p id="scanStatus" role="status"></p><video id="scanVideo" autoplay playsinline muted></video><div class="actions"><button type="button" id="closeScan">关闭扫码</button></div></dialog>
 <dialog id="backupPanel"><h2>数据备份</h2><p>数据保存在当前浏览器。换设备或清除浏览器数据前，请先导出。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
 <script>
 'use strict';
@@ -45,6 +47,10 @@ try {
 } catch { storageError = true; }
 let mode, selected;
 
+function validItemCode(value) {
+  return value.length > 0 && value.length <= 128 && value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
 function validate(data) {
   const date = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
     Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0,10) === value;
@@ -55,7 +61,7 @@ function validate(data) {
     if (!item || typeof item.id !== 'string' || !/^[\w-]+$/.test(item.id) || ids.has(item.id) ||
         typeof item.model !== 'string' || !item.model.trim() || typeof item.imei !== 'string' ||
         !/^\d{15}$/.test(item.imei) || imeis.has(item.imei) || typeof item.serial !== 'string' ||
-        !/^[A-Z0-9]+$/.test(item.serial) || serials.has(item.serial) || !amount(item.cost) ||
+        !validItemCode(item.serial) || serials.has(item.serial.toUpperCase()) || !amount(item.cost) ||
         (item.inbound !== null && !date(item.inbound)) ||
         (item.sale && (!date(item.sale.date) || !amount(item.sale.price) || item.sale.date < item.inbound)) ||
         (!item.sale && !item.inbound) ||
@@ -66,9 +72,9 @@ function validate(data) {
         (item.service && (!item.sale || !date(item.service.date) || item.service.date < item.sale.date ||
           !['open','closed','returned'].includes(item.service.state) ||
           typeof item.service.reason !== 'string' || !item.service.reason.trim()))) {
-      throw Error('记录无效或 IMEI / 序列号重复，请检查日期和设备信息');
+      throw Error('记录无效或 IMEI / 物品编号重复，请检查日期和设备信息');
     }
-    ids.add(item.id); imeis.add(item.imei); serials.add(item.serial);
+    ids.add(item.id); imeis.add(item.imei); serials.add(item.serial.toUpperCase());
   }
   return data;
 }
@@ -129,7 +135,7 @@ function card(item) {
   }
   if (page === 'service') buttons = action('编辑 / 标记状态','service',item) + action('删除售后','deleteService',item,'danger');
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><span class="tag">${states[status(item)]}</span></div>
-    <p class="muted">IMEI ${escape(item.imei)} · SN ${escape(item.serial)}</p>
+    <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(item.serial)}</p>
     <p>成本 ${money(item.cost)} ${escape(item.channel || '')}</p>
     ${saleInfo}${serviceInfo}${historyInfo}<p class="muted">${escape(item.note || '')}</p>
     <div class="actions">${buttons}</div></article>`;
@@ -173,6 +179,19 @@ function render() {
 function field(name,label,value='',attrs='',type='text') {
   return `<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" ${attrs}></label>`;
 }
+function choice(name,label,options,current,defaultValue) {
+  const value = current || defaultValue;
+  const values = options.includes(value) ? options : [...options, value];
+  return `<label>${label}<select name="${name}">${values.map(option =>
+    `<option value="${escape(option)}" ${option === value ? 'selected' : ''}>${escape(option)}</option>`
+  ).join('')}</select></label>`;
+}
+
+function scanField(name,label,value,attrs) {
+  return `<div class="scan-field">${field(name,label,value,attrs)}
+    <button type="button" data-scan="${name}" aria-label="扫码录入${label}">扫码录入</button></div>`;
+}
+
 function note(value) {
   return `<label class="wide">备注<textarea name="note">${escape(value)}</textarea></label>`;
 }
@@ -188,11 +207,12 @@ function openForm(next,item) {
   $('formTitle').textContent = {device:item ? '编辑设备' : '新增入库',sell:'标记售出',direct:'直接登记出库',saleEdit:'编辑出库',service:'售后登记'}[mode];
   let html = '';
   if (deviceFields) {
-    html += field('model','型号',item?.model,'required maxlength="80"') +
-      field('capacity','容量 / 版本',item?.capacity,'maxlength="80"') +
-      field('imei','IMEI',item?.imei,'required inputmode="numeric" pattern="[0-9]{15}" maxlength="15"') +
-      field('serial','序列号',item?.serial,'required pattern="[A-Za-z0-9]+" maxlength="40" autocapitalize="characters"') +
-      amount('cost','成本（元）',item?.cost) + field('channel','进货渠道',item?.channel);
+    html += choice('model','型号',['原机','原机Wi-Fi','其他'],item?.model,'原机') +
+      choice('capacity','容量',['32','128','256'],item?.capacity,'128') +
+      scanField('imei','IMEI',item?.imei,'required inputmode="numeric" pattern="[0-9]{15}" maxlength="15"') +
+      scanField('serial','物品编号',item?.serial,'required maxlength="128" autocapitalize="off" spellcheck="false"') +
+      amount('cost','成本（元）',item?.cost) +
+      choice('channel','进货渠道',['拍机堂','其他'],item?.channel,'拍机堂');
     if (mode === 'device' && (!item || item.inbound)) html += field('inbound','入库日期',item?.inbound || today(),'required','date');
     html += note(item?.note ?? '');
   }
@@ -219,7 +239,7 @@ $('form').addEventListener('submit',event => {
   try {
     const item = selected ? {...selected} : {id:crypto.randomUUID(),inbound:null};
     if (mode === 'device' || mode === 'direct') Object.assign(item,{
-      model:values.model, capacity:values.capacity, imei:values.imei, serial:values.serial.toUpperCase(),
+      model:values.model, capacity:values.capacity, imei:values.imei, serial:values.serial,
       cost:Math.round(Number(values.cost)*100), channel:values.channel, note:values.note, inbound:mode === 'direct' ? null : values.inbound || item.inbound
     });
     if (mode === 'sell' && item.service?.state === 'returned') {
@@ -262,6 +282,121 @@ $('records').addEventListener('click',event => {
     render();
   } catch (error) { alert(error.message); }
 });
+let scannerLibrary;
+let scanSession;
+
+function loadScanner() {
+  if (!scannerLibrary) {
+    scannerLibrary = new Promise((resolve,reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js';
+      script.onload = () => {
+        const Reader = window.ZXingBrowser?.BrowserMultiFormatReader;
+        if (Reader) resolve(Reader);
+        else reject(Error('扫码组件不可用'));
+      };
+      script.onerror = () => {
+        script.remove();
+        reject(Error('扫码组件加载失败'));
+      };
+      document.head.append(script);
+    }).catch(error => {
+      scannerLibrary = null;
+      throw error;
+    });
+  }
+  return scannerLibrary;
+}
+
+function stopScan() {
+  const session = scanSession;
+  scanSession = null;
+  clearTimeout(session?.timer);
+  session?.stream?.getTracks().forEach(track => track.stop());
+  $('scanVideo').srcObject = null;
+}
+
+function scanValue(name,raw) {
+  const value = raw.trim();
+  if (name === 'serial') return validItemCode(value) ? value : '';
+  if (/^\d{15}$/.test(value)) return value;
+  const matches = [...value.matchAll(/(?:^|[^A-Z0-9])IMEI\s*[:：]?\s*(\d{15})(?!\d)/gi)];
+  return matches.length === 1 ? matches[0][1] : '';
+}
+
+async function openScan(name) {
+  stopScan();
+  const session = {};
+  scanSession = session;
+  const video = $('scanVideo');
+  const panel = $('scanPanel');
+  $('scanTitle').textContent = name === 'imei' ? '扫码录入 IMEI' : '扫码录入物品编号';
+  $('scanStatus').textContent = '正在打开相机…';
+  panel.showModal();
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw Error('当前浏览器无法打开相机，请用 Safari 打开网站或手动输入。');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio:false, video:{facingMode:{ideal:'environment'},width:{ideal:1280}}
+    });
+    if (scanSession !== session) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    session.stream = stream;
+    video.srcObject = stream;
+    await video.play();
+    if (scanSession !== session) return;
+    const Reader = await loadScanner();
+    if (scanSession !== session) return;
+    const reader = new Reader();
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d',{willReadFrequently:true});
+    $('scanStatus').textContent = '把条形码或二维码放进画面。';
+    const scanFrame = () => {
+      if (scanSession !== session) return;
+      let result;
+      if (video.readyState >= 2 && video.videoWidth) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video,0,0);
+        try { result = reader.decodeFromCanvas(canvas); } catch { /* No readable code in this frame. */ }
+      }
+      if (result) {
+        const value = scanValue(name,result.getText());
+        if (value) {
+          $('form').elements.namedItem(name).value = value;
+          stopScan();
+          panel.close();
+          return;
+        }
+        $('scanStatus').textContent = name === 'imei' ? '请对准包含 15 位 IMEI 的码。' : '无法识别有效物品编号，请换一个码。';
+      }
+      session.timer = setTimeout(scanFrame,250);
+    };
+    scanFrame();
+  } catch (error) {
+    if (scanSession !== session) return;
+    stopScan();
+    $('scanStatus').textContent = error.name === 'NotAllowedError'
+      ? '相机权限未开启，请允许 Safari 使用相机，或关闭扫码后手动输入。'
+      : '相机或扫码组件暂不可用，可关闭扫码后手动输入。';
+  }
+}
+
+$('fields').addEventListener('click',event => {
+  const button = event.target.closest('button[data-scan]');
+  if (button) openScan(button.dataset.scan);
+});
+$('closeScan').onclick = () => {
+  stopScan();
+  $('scanPanel').close();
+};
+$('scanPanel').addEventListener('cancel',stopScan);
+$('scanPanel').addEventListener('close',() => {
+  if (!$('scanPanel').open) stopScan();
+});
+window.addEventListener('pagehide',stopScan);
+
 $('tabs').onclick = event => { if (event.target.dataset.tab) tab(event.target.dataset.tab); };
 $('add').onclick = () => openForm(page === 'sold' ? 'direct' : 'device');
 $('cancel').onclick = () => $('editor').close();
