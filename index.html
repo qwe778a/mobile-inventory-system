@@ -4,18 +4,17 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>拍机堂出入库</title>
 <style>
-:root{font:16px system-ui,-apple-system,sans-serif;color:#172d29;background:#f4f6f2;--green:#124d40;--line:#dce5dd}
-*{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eee7;color:var(--green);font-weight:650}button.primary{background:var(--green);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#536961}.hero{margin:22px 0;background:var(--green);color:white;border-radius:22px;padding:20px}.hero small{color:#d3e9df}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eee7;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#dcebe1}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102d25aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
-.scan-field{display:grid;gap:6px;align-content:start;min-width:0}.scan-field button{justify-self:start}#scanVideo{width:100%;max-height:42dvh;object-fit:contain;background:#172d29;border-radius:12px}
+:root{font:16px system-ui,-apple-system,sans-serif;color:#172d49;background:#f2f6fc;--blue:#174a92;--line:#d7e2f2}
+*{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eefb;color:var(--blue);font-weight:650}button.primary{background:var(--blue);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#4c607c}.hero{margin:22px 0;background:var(--blue);color:white;border-radius:22px;padding:20px}.hero small{color:#dbeaff}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eefb;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#d9e8ff}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102b50aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
+.scan-field{display:grid;gap:6px;align-content:start;min-width:0}.scan-field button{justify-self:start}#scanVideo{width:100%;max-height:42dvh;object-fit:contain;background:#172d49;border-radius:12px}
+.more{position:relative}.more summary{list-style:none;cursor:pointer;display:grid;place-items:center;min-width:44px;min-height:44px;border-radius:12px;background:#e6eefb;color:var(--blue);font-weight:700}.more summary::-webkit-details-marker{display:none}.more-options{position:absolute;right:0;top:calc(100% + 6px);z-index:2;min-width:132px;display:grid;gap:6px;background:white;padding:6px;border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 20px #172d4926}#logList{padding:0;list-style:none}#logList li{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}#logList time{display:block;color:#4c607c;font-size:14px;margin-top:4px}
 </style>
 <main>
-<header><h1>拍机堂出入库</h1><button id="backup">数据备份</button></header>
+<header><h1>拍机堂出入库</h1><details class="more" id="more"><summary aria-label="更多">•••</summary><div class="more-options"><button id="backup">数据备份</button><button id="logs">日志</button></div></details></header>
 <section class="hero" aria-label="统计"><small id="summaryTitle"></small><div class="metrics" id="metrics"></div></section>
 <div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button></div>
 <div class="filters">
-<label class="wide">搜索<input id="query" type="search" placeholder="型号、IMEI、物品编号、渠道或单号"></label>
-<label>开始日期<input id="from" type="date"></label>
-<label>结束日期<input id="to" type="date"></label>
+<label class="wide">搜索<input id="query" type="search" placeholder="完整物品编号或单号" autocapitalize="off" spellcheck="false"></label>
 <label>状态<select id="filter"></select></label>
 <label>清除筛选<button id="reset">显示全部</button></label>
 </div>
@@ -25,6 +24,7 @@
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
 <dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><video id="scanVideo" autoplay playsinline muted></video><div class="actions"><button type="button" id="closeScan">关闭扫码</button></div></dialog>
 <dialog id="backupPanel"><h2>数据备份</h2><p>数据保存在当前浏览器。换设备或清除浏览器数据前，请先导出。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
+<dialog id="logPanel"><div class="row"><h2>操作日志</h2><button id="closeLog">关闭</button></div><ul id="logList"></ul></dialog>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
@@ -41,9 +41,18 @@ let page = 'stock';
 let storageError = false;
 let source = null;
 let items = [];
+let logs = [];
 try {
   source = localStorage.getItem(key);
-  if (source !== null) items = validate(JSON.parse(source));
+  if (source !== null) {
+    const data = JSON.parse(source);
+    if (Array.isArray(data)) items = validate(data);
+    else {
+      const savedLogs = validateLogs(data.logs);
+      items = validate(data.items);
+      logs = savedLogs;
+    }
+  }
 } catch { storageError = true; }
 let mode, selected;
 
@@ -79,20 +88,28 @@ function validate(data) {
   return data;
 }
 
-function save(next, recover = false) {
+function validateLogs(data) {
+  if (!Array.isArray(data) || data.some(entry => !entry ||
+      typeof entry.action !== 'string' || typeof entry.detail !== 'string' ||
+      !Number.isFinite(Date.parse(entry.time)))) throw Error('日志格式无效');
+  return data;
+}
+
+function save(next, action, detail, {recover = false, previousLogs = logs} = {}) {
   validate(next);
   if (storageError && !recover) throw Error('现有数据无法读取，请从有效备份恢复');
   if (localStorage.getItem(key) !== source) throw Error('另一窗口已更新数据，请刷新后重试');
-  const encoded = JSON.stringify(next);
+  const nextLogs = [{time:new Date().toISOString(), action, detail}, ...previousLogs];
+  const encoded = JSON.stringify({items:next,logs:nextLogs});
   localStorage.setItem(key, encoded);
   source = encoded;
   items = next;
+  logs = nextLogs;
   storageError = false;
 }
 
 function tab(next) {
   page = next;
-  for (const id of ['query','from','to']) $(id).value = '';
   $('filter').innerHTML = '<option value="">全部状态</option>' +
     Object.entries(states).filter(([code]) => page !== 'service' || ['open','closed','returned'].includes(code))
       .map(([code,label]) => `<option value="${code}">${label}</option>`).join('');
@@ -118,9 +135,10 @@ function action(label, command, item, style = '') {
 
 function card(item) {
   const historyInfo = item.history?.length ? `<details><summary>历史退货（${item.history.length} 笔）</summary>
-    ${item.history.map(entry => `<p>出库 ${escape(entry.sale.date)} · ${money(entry.sale.price)} · 退货 ${escape(entry.service.date)} · ${escape(entry.service.reason)}</p>`).join('')}</details>` : '';
+    ${item.history.map(entry => `<p>出库 ${escape(entry.sale.date)} · ${money(entry.sale.price)} ${entry.sale.tracking ? '· 单号 '+escape(entry.sale.tracking) : ''} · 退货 ${escape(entry.service.date)} · ${escape(entry.service.reason)}</p>`).join('')}</details>` : '';
+  const tracking = item.sale?.tracking ? `<p class="muted">单号 ${escape(item.sale.tracking)}</p>` : '';
   const saleInfo = item.sale && page !== 'stock' && page !== 'inbound'
-    ? `<p>售价 ${money(item.sale.price)} · ${escape(item.sale.channel || '未填写销售渠道')} ${escape(item.sale.tracking || '')}</p>` : '';
+    ? `<p>售价 ${money(item.sale.price)} · ${escape(item.sale.channel || '未填写销售渠道')}</p>` : '';
   const serviceInfo = item.service && page === 'service'
     ? `<p>${escape(item.service.reason)}</p><p class="muted">${escape(item.service.note)}</p>` : '';
   let buttons = '';
@@ -137,7 +155,7 @@ function card(item) {
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><span class="tag">${states[status(item)]}</span></div>
     <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(item.serial)}</p>
     <p>成本 ${money(item.cost)} ${escape(item.channel || '')}</p>
-    ${saleInfo}${serviceInfo}${historyInfo}<p class="muted">${escape(item.note || '')}</p>
+    ${saleInfo}${tracking}${serviceInfo}${historyInfo}<p class="muted">${escape(item.note || '')}</p>
     <div class="actions">${buttons}</div></article>`;
 }
 
@@ -149,13 +167,12 @@ function render() {
   $('tabs').innerHTML = Object.entries(names).map(([code,label]) =>
     `<button data-tab="${code}" aria-current="${code === page}">${label}</button>`).join('');
   const query = $('query').value.trim().toLowerCase();
-  const from = $('from').value, to = $('to').value, filter = $('filter').value;
+  const filter = $('filter').value;
   const rows = items.filter(item => {
     if (!({stock:inStock(item),inbound:item.inbound,sold:item.sale,profit:activeSale(item),service:item.service})[page]) return false;
-    const date = dateFor(item);
-    return (!from || date >= from) && (!to || date <= to) && (!filter || status(item) === filter) &&
-      [item.model,item.capacity,item.imei,item.serial,item.channel,item.note,item.sale?.channel,item.sale?.tracking,item.service?.reason,item.service?.note]
-      .some(value => String(value ?? '').toLowerCase().includes(query));
+    return (!filter || status(item) === filter) && (!query ||
+      [item.serial,item.sale?.tracking,...(item.history ?? []).map(entry => entry.sale.tracking)]
+        .some(value => String(value ?? '').trim().toLowerCase() === query));
   });
   const cost = list => money(list.reduce((sum,item) => sum+item.cost,0));
   const stats = page === 'profit' || page === 'sold' ? totals(rows) : page === 'service'
@@ -272,7 +289,12 @@ $('form').addEventListener('submit',event => {
       date:values.date, price:Math.round(Number(values.price)*100), channel:values.saleChannel, tracking:values.tracking
     };
     if (mode === 'service') item.service = {date:values.date, reason:values.reason, state:values.state, note:values.note};
-    save(selected ? items.map(old => old.id === item.id ? item : old) : [...items,item]);
+    const actionName = {
+      device:selected ? '编辑设备' : '新增入库', direct:'直接出库', sell:'标记售出',
+      saleEdit:'编辑出库', service:selected?.service ? '更新售后 · '+states[values.state] : '新增售后 · '+states[values.state]
+    }[mode];
+    save(selected ? items.map(old => old.id === item.id ? item : old) : [...items,item], actionName, describeItem(item));
+    $('query').value = '';
     $('editor').close();
     tab(mode === 'direct' || mode === 'sell' ? 'sold' : page);
   } catch (error) { $('notice').textContent = error.message; }
@@ -298,7 +320,8 @@ $('records').addEventListener('click',event => {
       delete updated[command === 'deleteSale' ? 'sale' : 'service'];
       return [updated];
     });
-    save(next);
+    const actionName = {deleteDevice:'删除设备',deleteSale:'删除出库',deleteService:'删除售后'}[command];
+    save(next,actionName,describeItem(item));
     render();
   } catch (error) { alert(error.message); }
 });
@@ -415,17 +438,41 @@ $('tabs').onclick = event => { if (event.target.dataset.tab) tab(event.target.da
 $('add').onclick = () => openForm(page === 'sold' ? 'direct' : 'device');
 $('cancel').onclick = () => $('editor').close();
 $('query').oninput = render;
-for (const id of ['from','to','filter']) $(id).onchange = render;
+$('filter').onchange = render;
 $('reset').onclick = () => {
-  for (const id of ['query','from','to','filter']) $(id).value = '';
+  for (const id of ['query','filter']) $(id).value = '';
   render();
 };
-$('backup').onclick = () => $('backupPanel').showModal();
+function describeItem(item) {
+  const tracking = item.sale?.tracking;
+  return item.model+' · 物品编号 '+item.serial+(tracking ? ' · 单号 '+tracking : '');
+}
+document.addEventListener('click',event => {
+  if (!$('more').contains(event.target)) $('more').open = false;
+});
+$('more').addEventListener('keydown',event => {
+  if (event.key === 'Escape') {
+    $('more').open = false;
+    $('more').querySelector('summary').focus();
+  }
+});
+$('backup').onclick = () => {
+  $('more').open = false;
+  $('backupPanel').showModal();
+};
+$('logs').onclick = () => {
+  $('more').open = false;
+  $('logList').innerHTML = logs.map(entry =>
+    `<li><strong>${escape(entry.action)}</strong><p>${escape(entry.detail)}</p><time datetime="${escape(entry.time)}">${new Date(entry.time).toLocaleString('zh-CN',{hour12:false})}</time></li>`
+  ).join('') || '<li>暂无操作日志</li>';
+  $('logPanel').showModal();
+};
+$('closeLog').onclick = () => $('logPanel').close();
 $('closeBackup').onclick = () => $('backupPanel').close();
 $('restore').onclick = () => $('file').click();
 $('export').onclick = () => {
   if (storageError) { alert('当前数据无法正常读取'); return; }
-  const url = URL.createObjectURL(new Blob([JSON.stringify({version:1,items},null,2)],{type:'application/json'}));
+  const url = URL.createObjectURL(new Blob([JSON.stringify({version:1,items,logs},null,2)],{type:'application/json'}));
   const link = document.createElement('a');
   link.href = url;
   link.download = '拍机堂出入库-'+today()+'.json';
@@ -442,8 +489,10 @@ $('file').onchange = async event => {
     const backup = JSON.parse(await file.text());
     if (backup.version !== 1) throw Error('备份版本无效');
     validate(backup.items);
+    const previousLogs = backup.logs === undefined ? logs : validateLogs(backup.logs);
     if (!confirm('用这份备份替换当前所有数据？')) return;
-    save(backup.items,true);
+    save(backup.items,'导入备份','恢复 '+backup.items.length+' 台设备',{recover:true,previousLogs});
+    $('query').value = '';
     $('backupPanel').close();
     tab(page);
   } catch (error) { alert('导入失败：'+error.message); }
