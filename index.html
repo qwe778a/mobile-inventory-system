@@ -46,7 +46,7 @@
   <aside id="dropSidebar" class="drop-sidebar" aria-label="代发导航"><button data-drop-view="orders" aria-current="true">订单管理</button><button data-drop-view="profit">利润统计</button><button data-drop-view="logs">操作日志</button></aside>
   <section id="dropOrders" aria-labelledby="dropOrdersHeading">
     <div class="row"><h2 id="dropOrdersHeading">订单管理</h2><button id="newDropOrder" class="primary" type="button">＋ 新增订单</button></div>
-    <div class="filters"><label>搜索单号<input id="dropQuery" type="search" placeholder="闲鱼订单号或快递单号" autocapitalize="off"></label><label>状态<select id="dropFilter"><option value="">全部状态</option><option value="pending">待发货</option><option value="shipped">已发货</option><option value="done">已完成</option></select></label></div>
+    <div class="filters"><label>搜索单号<input id="dropQuery" type="search" placeholder="输入快递单号" autocapitalize="off"></label><label>状态<select id="dropFilter"><option value="">全部状态</option><option value="pending">待发货</option><option value="shipped">已发货</option><option value="done">已完成</option></select></label></div>
     <div id="dropRows"></div>
   </section>
   <section id="dropProfit" aria-labelledby="dropProfitHeading" hidden><h2 id="dropProfitHeading">利润统计</h2><div id="dropTotals" class="metrics drop-metrics"></div><div id="dropProfitRows"></div></section>
@@ -55,8 +55,9 @@
 </main>
 <dialog id="dropEditor"><h2 id="dropFormTitle">新增代发订单</h2>
 <form id="dropForm"><div class="fields">
-  <label class="wide">商品名称<input name="product" required maxlength="100"></label>
-  <label>闲鱼订单号<input name="orderNumber" maxlength="100" autocapitalize="off"></label>
+  <label>网络<select name="network" required><option value="">请选择网络</option><option>Wi-Fi</option><option>插卡</option><option>无锁Wi-Fi</option><option>无锁插卡</option></select></label>
+  <label>指纹<select name="fingerprint" required><option value="">请选择指纹</option><option>指纹</option><option>无指纹</option></select></label>
+  <label>内存<select name="memory" required><option value="">请选择内存</option><option value="32">32 GB</option><option value="128">128 GB</option></select></label>
   <label>代发渠道<input name="supplier" required maxlength="100"></label>
   <label>成本（元）<input type="number" inputmode="decimal" name="cost" required min="0" max="9999999.99" step="0.01"></label>
   <label>售价（元）<input type="number" inputmode="decimal" name="price" required min="0" max="9999999.99" step="0.01"></label>
@@ -686,7 +687,7 @@ tab(page);
   function saveDropship(orders, action, order) {
     if (dropStorageError) throw Error('本机代发数据无法读取，请刷新后重试。');
     if (localStorage.getItem(dropKey) !== dropSource) throw Error('代发数据已在另一窗口更新，请刷新后重试。');
-    const entry = {action,product:order.product,orderNumber:order.orderNumber,at:new Date().toISOString()};
+    const entry = {action,product:order.product,at:new Date().toISOString()};
     const next = {orders,logs:[entry,...dropState.logs]};
     const encoded = JSON.stringify(next);
     localStorage.setItem(dropKey,encoded);
@@ -700,14 +701,13 @@ tab(page);
     const filter = $('dropFilter').value;
     const orders = [...dropState.orders].sort((a,b) => b.date.localeCompare(a.date));
     const filtered = orders.filter(order => (!filter || filter === order.status) &&
-      (!query || [order.orderNumber,order.tracking].some(number => number.toLowerCase().includes(query))));
+      (!query || (order.tracking ?? '').toLowerCase().includes(query)));
     $('newDropOrder').disabled = dropStorageError;
     $('dropRows').innerHTML = dropStorageError ? '<p class="empty">本机代发数据无法读取。</p>' :
       filtered.map(order => {
         const move = nextStatus[order.status];
         return `<article><div class="row"><h3>${escape(order.product)}</h3><span class="tag">${statusNames[order.status]}</span></div>
           <p class="muted">${escape(order.date)} · ${escape(order.supplier)}</p>
-          ${order.orderNumber ? `<p>闲鱼订单号 ${escape(order.orderNumber)}</p>` : ''}
           ${order.tracking ? `<p>快递单号 ${escape(order.tracking)}</p>` : ''}
           <div class="actions">
             <button data-drop-action="detail" data-id="${escape(order.id)}">详情</button>
@@ -726,7 +726,7 @@ tab(page);
       `<article><div class="row"><h3>${escape(order.product)}</h3><strong>${money(order.price-order.cost)}</strong></div><p class="muted">${escape(order.date)}</p></article>`
     ).join('') || '<p class="empty">暂无已完成订单。</p>';
     $('dropLogRows').innerHTML = dropState.logs.map(entry =>
-      `<li><strong>${escape(entry.action)}</strong><p>${escape(entry.product)} ${escape(entry.orderNumber)}</p><time class="muted">${new Date(entry.at).toLocaleString('zh-CN',{hour12:false})}</time></li>`
+      `<li><strong>${escape(entry.action)}</strong><p>${escape(entry.product)}</p><time class="muted">${new Date(entry.at).toLocaleString('zh-CN',{hour12:false})}</time></li>`
     ).join('') || '<li class="empty">暂无操作日志。</li>';
   }
 
@@ -738,8 +738,8 @@ tab(page);
     $('dropError').textContent = '';
     form.elements.namedItem('date').value = today();
     if (order) {
-      for (const name of ['product','orderNumber','supplier','tracking','date','status','note']) {
-        form.elements.namedItem(name).value = order[name];
+      for (const name of ['network','fingerprint','memory','supplier','tracking','date','status','note']) {
+        form.elements.namedItem(name).value = order[name] ?? '';
       }
       form.elements.namedItem('price').value = order.price/100;
       form.elements.namedItem('cost').value = order.cost/100;
@@ -766,14 +766,15 @@ tab(page);
     event.preventDefault();
     const values = Object.fromEntries([...new FormData(event.target)].map(([name,value]) => [name,value.trim()]));
     try {
-      if (!values.product || !values.supplier) throw Error('请填写商品名称和代发渠道。');
-      if (editedId && !dropState.orders.some(order => order.id === editedId)) throw Error('这笔订单已不存在。');
-      if (values.orderNumber && dropState.orders.some(order =>
-        order.id !== editedId && order.orderNumber.toLowerCase() === values.orderNumber.toLowerCase())) {
-        throw Error('该闲鱼订单号已存在。');
+      if (!values.supplier || !values.network || !values.fingerprint || !values.memory) {
+        throw Error('请选好网络、指纹和内存，并填写代发渠道。');
       }
+      const previous = dropState.orders.find(order => order.id === editedId);
+      if (editedId && !previous) throw Error('这笔订单已不存在。');
       const order = {
-        ...values,id:editedId || crypto.randomUUID(),cost:Math.round(Number(values.cost)*100),price:Math.round(Number(values.price)*100)
+        ...previous,...values,id:editedId || crypto.randomUUID(),
+        product:`${values.network} · ${values.fingerprint} · ${values.memory} GB`,
+        cost:Math.round(Number(values.cost)*100),price:Math.round(Number(values.price)*100)
       };
       const orders = editedId ? dropState.orders.map(o => o.id === editedId ? order : o) : [order,...dropState.orders];
       saveDropship(orders,editedId ? '编辑订单 · '+statusNames[order.status] : '新增订单',order);
@@ -791,7 +792,7 @@ tab(page);
     const command = button.dataset.dropAction;
     if (command === 'edit') { openDropForm(order); return; }
     if (command === 'detail') {
-      const fields = [['商品',order.product],['闲鱼订单号',order.orderNumber],['代发渠道',order.supplier],
+      const fields = [['商品规格',order.product],['代发渠道',order.supplier],
         ['下单日期',order.date],['状态',statusNames[order.status]],['快递单号',order.tracking],
         ['成本',money(order.cost)],['售价',money(order.price)],['单笔利润',money(order.price-order.cost)],['备注',order.note]];
       $('dropDetailRows').innerHTML = fields.map(([label,value]) =>
