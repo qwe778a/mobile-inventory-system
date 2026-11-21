@@ -8,13 +8,17 @@
 *{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eefb;color:var(--blue);font-weight:650}button.primary{background:var(--blue);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#4c607c}.hero{margin:22px 0;background:var(--blue);color:white;border-radius:22px;padding:20px}.hero small{color:#dbeaff}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eefb;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#d9e8ff}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102b50aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
 .scan-field{display:grid;gap:6px;align-content:start;min-width:0}.scan-field button{justify-self:start}#scanVideo{width:100%;max-height:42dvh;object-fit:contain;background:#172d49;border-radius:12px}
 .more{position:relative}.more summary{list-style:none;cursor:pointer;display:grid;place-items:center;min-width:44px;min-height:44px;border-radius:12px;background:#e6eefb;color:var(--blue);font-weight:700}.more summary::-webkit-details-marker{display:none}.more-options{position:absolute;right:0;top:calc(100% + 6px);z-index:2;min-width:132px;display:grid;gap:6px;background:white;padding:6px;border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 20px #172d4926}#logList{padding:0;list-style:none}#logList li{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}#logList time{display:block;color:#4c607c;font-size:14px;margin-top:4px}
+.search-input{position:relative;display:block}.search-input svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--blue);pointer-events:none}.search-input input{padding-left:38px}
 </style>
 <main>
 <header><h1>拍机堂出入库</h1><details class="more" id="more"><summary aria-label="更多">•••</summary><div class="more-options"><button id="backup">数据备份</button><button id="logs">日志</button></div></details></header>
 <section class="hero" aria-label="统计"><small id="summaryTitle"></small><div class="metrics" id="metrics"></div></section>
 <div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button></div>
 <div class="filters">
-<label class="wide">搜索<input id="query" type="search" placeholder="完整物品编号或单号" autocapitalize="off" spellcheck="false"></label>
+<label class="wide">搜索<span class="search-input">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+  <input id="query" type="search" placeholder="物品编号或单号（支持后四位）" autocapitalize="off" spellcheck="false">
+</span></label>
 <label>状态<select id="filter"></select></label>
 <label>清除筛选<button id="reset">显示全部</button></label>
 </div>
@@ -172,7 +176,10 @@ function render() {
     if (!({stock:inStock(item),inbound:item.inbound,sold:item.sale,profit:activeSale(item),service:item.service})[page]) return false;
     return (!filter || status(item) === filter) && (!query ||
       [item.serial,item.sale?.tracking,...(item.history ?? []).map(entry => entry.sale.tracking)]
-        .some(value => String(value ?? '').trim().toLowerCase() === query));
+        .some(value => {
+          const number = String(value ?? '').trim().toLowerCase();
+          return number === query || (query.length === 4 && number.endsWith(query));
+        }));
   });
   const cost = list => money(list.reduce((sum,item) => sum+item.cost,0));
   const stats = page === 'profit' || page === 'sold' ? totals(rows) : page === 'service'
