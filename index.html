@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>拍机堂出入库</title>
+<title>闲鱼</title>
 <style>
 :root{font:16px system-ui,-apple-system,sans-serif;color:#172d49;background:#f2f6fc;--blue:#174a92;--line:#d7e2f2}
 *{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eefb;color:var(--blue);font-weight:650}button.primary{background:var(--blue);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#4c607c}.hero{margin:22px 0;background:var(--blue);color:white;border-radius:22px;padding:20px}.hero small{color:#dbeaff}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eefb;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#d9e8ff}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102b50aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
@@ -13,9 +13,20 @@
 .more{position:relative}.more summary{list-style:none;cursor:pointer;display:grid;place-items:center;min-width:44px;min-height:44px;border-radius:12px;background:#e6eefb;color:var(--blue);font-weight:700}.more summary::-webkit-details-marker{display:none}.more-options{position:absolute;right:0;top:calc(100% + 6px);z-index:2;min-width:132px;display:grid;gap:6px;background:white;padding:6px;border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 20px #172d4926}#logList{padding:0;list-style:none}#logList li{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}#logList time{display:block;color:#4c607c;font-size:14px;margin-top:4px}
 .search-input{position:relative;display:block}.search-input svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--blue);pointer-events:none}.search-input input{padding-left:38px}
 .required-mark{color:#b12424;font-weight:700}.fields{align-items:start}.problem-option{display:flex;align-items:center;gap:10px;min-height:44px}.problem-option input{width:20px;height:20px;min-height:0;margin:0;accent-color:#b12424}.record-tags{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.problem-tag{color:#a21b1b;background:#ffe6e5;font-weight:700}
+[hidden]{display:none!important}
+.hub{max-width:860px;padding-top:clamp(35px,10vw,100px)}.hub h1{font-size:42px;color:#182844}.hub-options{display:grid;gap:14px;margin-top:24px}.hub-option{text-align:left;background:#fff;border:1px solid var(--line);padding:20px;border-radius:20px;display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:105px}.hub-option strong{display:block;font-size:22px}.hub-option small{display:block;margin-top:7px;font-weight:400}.hub-option .arrow{font-size:24px}
+.inventory-title{display:flex;gap:8px;align-items:center}.inventory-title h1{font-size:clamp(19px,5vw,26px)}.drop-shell{max-width:1060px}.drop-sidebar{display:grid;gap:8px;margin:12px 0;padding:10px;background:#213958;border-radius:16px}.drop-sidebar button{text-align:left;background:transparent;color:#fff}.drop-sidebar button[aria-current=true]{background:#36557b}.drop-layout{margin-top:20px}.drop-layout section{min-width:0}.drop-layout article .actions{margin-top:12px}.drop-layout h2{overflow-wrap:anywhere}.drop-metrics{margin:12px 0 18px}.drop-metrics .metric{background:#e6eefb}.drop-log{list-style:none;padding:0}.drop-log li{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}#dropError{color:#9a301e}.drop-details{display:grid;grid-template-columns:auto 1fr;gap:8px 14px}.drop-details dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+@media(min-width:680px){.hub-options{grid-template-columns:repeat(2,minmax(0,1fr))}.drop-layout{display:grid;grid-template-columns:170px minmax(0,1fr);gap:18px}.drop-sidebar{align-self:start;margin:0}.drop-menu-button{display:none}}
 </style>
-<main>
-<header><h1>拍机堂出入库</h1><details class="more" id="more"><summary aria-label="更多">•••</summary><div class="more-options"><button id="backup">数据备份</button><button id="logs">日志</button></div></details></header>
+<main id="hub" class="hub">
+<h1 tabindex="-1">闲鱼</h1>
+<div class="hub-options">
+  <button class="hub-option" id="openInventory"><span><strong>拍机堂</strong><small>管理库存、入库、出库与售后</small></span><span class="arrow" aria-hidden="true">›</span></button>
+  <button class="hub-option" id="openDropship"><span><strong>代发</strong><small>管理代发订单、发货状态与利润</small></span><span class="arrow" aria-hidden="true">›</span></button>
+</div>
+</main>
+<main id="inventory" hidden>
+<header><div class="inventory-title"><button type="button" data-home>首页</button><h1 tabindex="-1">拍机堂出入库</h1></div><details class="more" id="more"><summary aria-label="更多">•••</summary><div class="more-options"><button id="backup">数据备份</button><button id="logs">日志</button></div></details></header>
 <section class="hero" aria-label="统计"><small id="summaryTitle"></small><div class="metrics" id="metrics"></div></section>
 <div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button></div>
 <div class="filters">
@@ -28,7 +39,33 @@
 </div>
 <section id="records"></section>
 </main>
-<nav aria-label="功能"><div id="tabs"></div></nav>
+<nav id="inventoryNav" aria-label="拍机堂功能" hidden><div id="tabs"></div></nav>
+<main id="dropship" class="drop-shell" hidden>
+<header><div class="inventory-title"><button id="dropMenu" class="drop-menu-button" type="button" aria-controls="dropSidebar" aria-expanded="false">菜单</button><h1 tabindex="-1">代发</h1></div><button type="button" data-home>首页</button></header>
+<div class="drop-layout">
+  <aside id="dropSidebar" class="drop-sidebar" aria-label="代发导航"><button data-drop-view="orders" aria-current="true">订单管理</button><button data-drop-view="profit">利润统计</button><button data-drop-view="logs">操作日志</button></aside>
+  <section id="dropOrders" aria-labelledby="dropOrdersHeading">
+    <div class="row"><h2 id="dropOrdersHeading">订单管理</h2><button id="newDropOrder" class="primary" type="button">＋ 新增订单</button></div>
+    <div class="filters"><label>搜索单号<input id="dropQuery" type="search" placeholder="闲鱼订单号或快递单号" autocapitalize="off"></label><label>状态<select id="dropFilter"><option value="">全部状态</option><option value="pending">待发货</option><option value="shipped">已发货</option><option value="done">已完成</option></select></label></div>
+    <div id="dropRows"></div>
+  </section>
+  <section id="dropProfit" aria-labelledby="dropProfitHeading" hidden><h2 id="dropProfitHeading">利润统计</h2><div id="dropTotals" class="metrics drop-metrics"></div><div id="dropProfitRows"></div></section>
+  <section id="dropLogs" aria-labelledby="dropLogsHeading" hidden><h2 id="dropLogsHeading">操作日志</h2><ul id="dropLogRows" class="drop-log"></ul></section>
+</div>
+</main>
+<dialog id="dropEditor"><h2 id="dropFormTitle">新增代发订单</h2>
+<form id="dropForm"><div class="fields">
+  <label class="wide">商品名称<input name="product" required maxlength="100"></label>
+  <label>闲鱼订单号<input name="orderNumber" maxlength="100" autocapitalize="off"></label>
+  <label>代发渠道<input name="supplier" required maxlength="100"></label>
+  <label>成本（元）<input type="number" inputmode="decimal" name="cost" required min="0" max="9999999.99" step="0.01"></label>
+  <label>售价（元）<input type="number" inputmode="decimal" name="price" required min="0" max="9999999.99" step="0.01"></label>
+  <label>快递单号<input name="tracking" maxlength="100" autocapitalize="off"></label>
+  <label>下单日期<input type="date" name="date" required></label>
+  <label>状态<select name="status"><option value="pending">待发货</option><option value="shipped">已发货</option><option value="done">已完成</option></select></label>
+  <label class="wide">备注<textarea name="note" maxlength="1000"></textarea></label>
+</div><output id="dropError" role="alert"></output><div class="actions"><button class="primary">保存</button><button id="cancelDropOrder" type="button">取消</button></div></form></dialog>
+<dialog id="dropDetail"><h2>订单详情</h2><dl class="drop-details" id="dropDetailRows"></dl><div class="actions"><button id="closeDropDetail" type="button">关闭</button></div></dialog>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
 <dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><div class="scan-preview"><video id="scanVideo" autoplay playsinline muted></video><div class="scan-guide" aria-hidden="true"></div></div><div class="actions"><button type="button" id="pickScanPhoto">从照片识别</button><button type="button" id="closeScan">关闭扫码</button></div><input id="scanPhoto" type="file" accept="image/*" hidden></dialog>
 <dialog id="backupPanel"><h2>数据备份</h2><p>数据保存在当前浏览器。换设备或清除浏览器数据前，请先导出。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
@@ -596,5 +633,188 @@ window.addEventListener('storage',event => {
   if (event.key === key || event.key === null) location.reload();
 });
 tab(page);
+</script>
+<script>
+(() => {
+  'use strict';
+  const dropKey = 'xianyu-dropship-v1';
+  const statusNames = {pending:'待发货',shipped:'已发货',done:'已完成'};
+  const nextStatus = {pending:'shipped',shipped:'done'};
+  const sections = {orders:'dropOrders',profit:'dropProfit',logs:'dropLogs'};
+  const phoneLayout = matchMedia('(max-width:679px)');
+  let dropSource;
+  let dropState = {orders:[],logs:[]};
+  let dropStorageError = false;
+  let editedId = null;
+
+  function readDropship() {
+    try {
+      dropSource = localStorage.getItem(dropKey);
+      const data = dropSource === null ? {orders:[],logs:[]} : JSON.parse(dropSource);
+      if (!Array.isArray(data.orders) || !Array.isArray(data.logs)) throw Error('代发数据格式无效');
+      dropState = data;
+      dropStorageError = false;
+    } catch {
+      dropStorageError = true;
+    }
+    renderDropship();
+  }
+
+  function setSidebar(expanded) {
+    $('dropSidebar').hidden = phoneLayout.matches && !expanded;
+    $('dropMenu').setAttribute('aria-expanded',String(expanded));
+  }
+
+  function showModule(id) {
+    for (const panel of ['hub','inventory','dropship']) $(panel).hidden = panel !== id;
+    $('inventoryNav').hidden = id !== 'inventory';
+    if (id === 'dropship') setSidebar(false);
+    window.scrollTo(0,0);
+    $(id).querySelector('h1').focus({preventScroll:true});
+  }
+
+  function showDropView(view) {
+    for (const [name,id] of Object.entries(sections)) $(id).hidden = name !== view;
+    for (const button of $('dropSidebar').querySelectorAll('[data-drop-view]')) {
+      button.setAttribute('aria-current',String(button.dataset.dropView === view));
+    }
+    setSidebar(false);
+    $(sections[view]).querySelector('h2').setAttribute('tabindex','-1');
+    $(sections[view]).querySelector('h2').focus();
+  }
+
+  function saveDropship(orders, action, order) {
+    if (dropStorageError) throw Error('本机代发数据无法读取，请刷新后重试。');
+    if (localStorage.getItem(dropKey) !== dropSource) throw Error('代发数据已在另一窗口更新，请刷新后重试。');
+    const entry = {action,product:order.product,orderNumber:order.orderNumber,at:new Date().toISOString()};
+    const next = {orders,logs:[entry,...dropState.logs]};
+    const encoded = JSON.stringify(next);
+    localStorage.setItem(dropKey,encoded);
+    dropSource = encoded;
+    dropState = next;
+    renderDropship();
+  }
+
+  function renderDropship() {
+    const query = $('dropQuery').value.trim().toLowerCase();
+    const filter = $('dropFilter').value;
+    const orders = [...dropState.orders].sort((a,b) => b.date.localeCompare(a.date));
+    const filtered = orders.filter(order => (!filter || filter === order.status) &&
+      (!query || [order.orderNumber,order.tracking].some(number => number.toLowerCase().includes(query))));
+    $('newDropOrder').disabled = dropStorageError;
+    $('dropRows').innerHTML = dropStorageError ? '<p class="empty">本机代发数据无法读取。</p>' :
+      filtered.map(order => {
+        const move = nextStatus[order.status];
+        return `<article><div class="row"><h3>${escape(order.product)}</h3><span class="tag">${statusNames[order.status]}</span></div>
+          <p class="muted">${escape(order.date)} · ${escape(order.supplier)}</p>
+          ${order.orderNumber ? `<p>闲鱼订单号 ${escape(order.orderNumber)}</p>` : ''}
+          ${order.tracking ? `<p>快递单号 ${escape(order.tracking)}</p>` : ''}
+          <div class="actions">
+            <button data-drop-action="detail" data-id="${escape(order.id)}">详情</button>
+            <button data-drop-action="edit" data-id="${escape(order.id)}">编辑</button>
+            ${move ? `<button class="primary" data-drop-action="advance" data-id="${escape(order.id)}">标记${statusNames[move]}</button>` : ''}
+            <button class="danger" data-drop-action="delete" data-id="${escape(order.id)}">删除</button>
+          </div></article>`;
+      }).join('') || '<p class="empty">暂无符合条件的代发订单。</p>';
+    const completed = orders.filter(order => order.status === 'done');
+    const revenue = completed.reduce((sum,order) => sum+order.price,0);
+    const costs = completed.reduce((sum,order) => sum+order.cost,0);
+    const metrics = [['已完成订单',completed.length+' 笔'],['销售额',money(revenue)],['成本',money(costs)],['利润',money(revenue-costs)]];
+    $('dropTotals').innerHTML = metrics.map(([label,value]) =>
+      `<div class="metric"><small>${label}</small><strong>${value}</strong></div>`).join('');
+    $('dropProfitRows').innerHTML = completed.map(order =>
+      `<article><div class="row"><h3>${escape(order.product)}</h3><strong>${money(order.price-order.cost)}</strong></div><p class="muted">${escape(order.date)}</p></article>`
+    ).join('') || '<p class="empty">暂无已完成订单。</p>';
+    $('dropLogRows').innerHTML = dropState.logs.map(entry =>
+      `<li><strong>${escape(entry.action)}</strong><p>${escape(entry.product)} ${escape(entry.orderNumber)}</p><time class="muted">${new Date(entry.at).toLocaleString('zh-CN',{hour12:false})}</time></li>`
+    ).join('') || '<li class="empty">暂无操作日志。</li>';
+  }
+
+  function openDropForm(order) {
+    editedId = order?.id ?? null;
+    const form = $('dropForm');
+    form.reset();
+    $('dropFormTitle').textContent = order ? '编辑代发订单' : '新增代发订单';
+    $('dropError').textContent = '';
+    form.elements.namedItem('date').value = today();
+    if (order) {
+      for (const name of ['product','orderNumber','supplier','tracking','date','status','note']) {
+        form.elements.namedItem(name).value = order[name];
+      }
+      form.elements.namedItem('price').value = order.price/100;
+      form.elements.namedItem('cost').value = order.cost/100;
+    }
+    $('dropEditor').showModal();
+  }
+
+  $('openInventory').onclick = () => showModule('inventory');
+  $('openDropship').onclick = () => { showDropView('orders'); showModule('dropship'); };
+  for (const button of document.querySelectorAll('[data-home]')) button.onclick = () => showModule('hub');
+  $('dropMenu').onclick = () => setSidebar($('dropSidebar').hidden);
+  phoneLayout.addEventListener('change',() => setSidebar(false));
+  $('dropSidebar').onclick = event => {
+    const view = event.target.closest('[data-drop-view]')?.dataset.dropView;
+    if (view) showDropView(view);
+  };
+  $('dropQuery').oninput = renderDropship;
+  $('dropFilter').onchange = renderDropship;
+  $('newDropOrder').onclick = () => openDropForm();
+  $('cancelDropOrder').onclick = () => $('dropEditor').close();
+  $('closeDropDetail').onclick = () => $('dropDetail').close();
+
+  $('dropForm').onsubmit = event => {
+    event.preventDefault();
+    const values = Object.fromEntries([...new FormData(event.target)].map(([name,value]) => [name,value.trim()]));
+    try {
+      if (!values.product || !values.supplier) throw Error('请填写商品名称和代发渠道。');
+      if (editedId && !dropState.orders.some(order => order.id === editedId)) throw Error('这笔订单已不存在。');
+      if (values.orderNumber && dropState.orders.some(order =>
+        order.id !== editedId && order.orderNumber.toLowerCase() === values.orderNumber.toLowerCase())) {
+        throw Error('该闲鱼订单号已存在。');
+      }
+      const order = {
+        ...values,id:editedId || crypto.randomUUID(),cost:Math.round(Number(values.cost)*100),price:Math.round(Number(values.price)*100)
+      };
+      const orders = editedId ? dropState.orders.map(o => o.id === editedId ? order : o) : [order,...dropState.orders];
+      saveDropship(orders,editedId ? '编辑订单 · '+statusNames[order.status] : '新增订单',order);
+      $('dropEditor').close();
+    } catch (error) {
+      $('dropError').textContent = error.message;
+    }
+  };
+
+  $('dropRows').onclick = event => {
+    const button = event.target.closest('[data-drop-action]');
+    if (!button) return;
+    const order = dropState.orders.find(o => o.id === button.dataset.id);
+    if (!order) return;
+    const command = button.dataset.dropAction;
+    if (command === 'edit') { openDropForm(order); return; }
+    if (command === 'detail') {
+      const fields = [['商品',order.product],['闲鱼订单号',order.orderNumber],['代发渠道',order.supplier],
+        ['下单日期',order.date],['状态',statusNames[order.status]],['快递单号',order.tracking],
+        ['成本',money(order.cost)],['售价',money(order.price)],['单笔利润',money(order.price-order.cost)],['备注',order.note]];
+      $('dropDetailRows').innerHTML = fields.map(([label,value]) =>
+        `<dt>${label}</dt><dd>${escape(value || '—')}</dd>`).join('');
+      $('dropDetail').showModal();
+      return;
+    }
+    try {
+      if (command === 'advance' && nextStatus[order.status]) {
+        const updated = {...order,status:nextStatus[order.status]};
+        saveDropship(dropState.orders.map(o => o.id === order.id ? updated : o),'标记'+statusNames[updated.status],updated);
+      }
+      if (command === 'delete' && confirm('删除这笔代发订单？')) {
+        saveDropship(dropState.orders.filter(o => o.id !== order.id),'删除订单',order);
+      }
+    } catch (error) { alert(error.message); }
+  };
+
+  window.addEventListener('storage',event => {
+    if (event.key === dropKey) readDropship();
+  });
+  setSidebar(false);
+  readDropship();
+})();
 </script>
 </html>
