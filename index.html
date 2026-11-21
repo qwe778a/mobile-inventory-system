@@ -202,7 +202,7 @@ function saleCharges(item) {
     ['海南','宁夏','青海'].includes(region) ? 700 :
     ['西藏','新疆'].includes(region) ? 1500 : 300;
   const trips = item.service?.reason === '换货' ? 3 : 1;
-  const fee = Math.round(item.sale.price * 16 / 1000);
+  const fee = String(item.sale.channel ?? '').trim() === '代发' ? 0 : Math.round(item.sale.price * 16 / 1000);
   const freight = rate * trips;
   return {fee,freight,trips,region,net:item.sale.price-item.cost-fee-freight};
 }
@@ -301,7 +301,7 @@ function choice(name,label,options,current,defaultValue) {
   const value = current || defaultValue;
   const values = options.includes(value) ? options : [...options, value];
   return `<label><span>${label}${name === 'model' ? requiredMark : ''}</span><select name="${name}"${name === 'model' ? ' required' : ''}>${values.map(option =>
-    `<option value="${escape(option)}" ${option === value ? 'selected' : ''}>${escape(option)}</option>`
+    `<option value="${escape(option)}" ${option === value ? 'selected' : ''}>${escape(option || "请选择")}</option>`
   ).join('')}</select></label>`;
 }
 
@@ -363,7 +363,7 @@ function openForm(next,item) {
   }
   if (selling) {
     html += field('date','出库日期',sale?.date || today(),'required','date') +
-      amount('price','售价（元）',sale?.price) + field('saleChannel','销售渠道',sale?.channel) +
+      amount('price','售价（元）',sale?.price) + customChoice('saleChannel','销售渠道',['','闲鱼','代发'],sale?.channel,'') +
       field('tracking','单号',sale?.tracking) +
       `<label class="wide">收货地址<textarea name="saleAddress" rows="3" maxlength="500" placeholder="请包含省份或直辖市，用于计算运费">${escape(sale?.address)}</textarea></label>`;
   }
@@ -380,7 +380,7 @@ function openForm(next,item) {
   }
   $('form').noValidate = deviceFields;
   $('fields').innerHTML = html;
-  for (const select of $('fields').querySelectorAll('select[name="model"], select[name="channel"]')) {
+  for (const select of $('fields').querySelectorAll('select[name="model"], select[name="channel"], select[name="saleChannel"]')) {
     syncCustomChoice(select);
   }
   if (mode === 'service') {
@@ -419,7 +419,7 @@ $('form').addEventListener('submit',event => {
       delete item.service;
     }
     if (['direct','sell','saleEdit'].includes(mode)) item.sale = {
-      date:values.date, price:Math.round(Number(values.price)*100), channel:values.saleChannel, tracking:values.tracking, address:values.saleAddress
+      date:values.date, price:Math.round(Number(values.price)*100), channel:values.saleChannel === '其他' ? values.saleChannelCustom || '其他' : values.saleChannel, tracking:values.tracking, address:values.saleAddress
     };
     if (mode === 'service') {
       const exchange = values.reason === '换货';
@@ -629,7 +629,7 @@ $('fields').addEventListener('click',event => {
   if (button) openScan();
 });
 $('fields').addEventListener('change',event => {
-  if (event.target.matches('select[name="model"], select[name="channel"]')) syncCustomChoice(event.target);
+  if (event.target.matches('select[name="model"], select[name="channel"], select[name="saleChannel"]')) syncCustomChoice(event.target);
   if (event.target.matches('select[name="reason"]')) syncServiceProgress();
 });
 $('closeScan').onclick = () => {
