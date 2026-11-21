@@ -6,7 +6,10 @@
 <style>
 :root{font:16px system-ui,-apple-system,sans-serif;color:#172d49;background:#f2f6fc;--blue:#174a92;--line:#d7e2f2}
 *{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eefb;color:var(--blue);font-weight:650}button.primary{background:var(--blue);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#4c607c}.hero{margin:22px 0;background:var(--blue);color:white;border-radius:22px;padding:20px}.hero small{color:#dbeaff}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eefb;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#d9e8ff}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102b50aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
-.scan-field{display:grid;gap:6px;align-content:start;min-width:0}.scan-field button{justify-self:start}#scanVideo{width:100%;max-height:42dvh;object-fit:contain;background:#172d49;border-radius:12px}
+.scan-field{display:grid;gap:6px;align-content:start;min-width:0}.scan-field button{justify-self:start}.scan-preview{position:relative;height:min(48dvh,420px);background:#172d49;border-radius:12px;overflow:hidden}
+#scanVideo{display:block;width:100%;height:100%;object-fit:contain}
+.scan-guide{position:absolute;inset:10%;border:2px solid #e5efff;border-radius:14px;pointer-events:none;box-shadow:0 0 0 100vmax #08245144}
+#scanStatus{min-height:2.8em}
 .more{position:relative}.more summary{list-style:none;cursor:pointer;display:grid;place-items:center;min-width:44px;min-height:44px;border-radius:12px;background:#e6eefb;color:var(--blue);font-weight:700}.more summary::-webkit-details-marker{display:none}.more-options{position:absolute;right:0;top:calc(100% + 6px);z-index:2;min-width:132px;display:grid;gap:6px;background:white;padding:6px;border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 20px #172d4926}#logList{padding:0;list-style:none}#logList li{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}#logList time{display:block;color:#4c607c;font-size:14px;margin-top:4px}
 .search-input{position:relative;display:block}.search-input svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--blue);pointer-events:none}.search-input input{padding-left:38px}
 </style>
@@ -26,7 +29,7 @@
 </main>
 <nav aria-label="功能"><div id="tabs"></div></nav>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
-<dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><video id="scanVideo" autoplay playsinline muted></video><div class="actions"><button type="button" id="closeScan">关闭扫码</button></div></dialog>
+<dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><div class="scan-preview"><video id="scanVideo" autoplay playsinline muted></video><div class="scan-guide" aria-hidden="true"></div></div><div class="actions"><button type="button" id="pickScanPhoto">从照片识别</button><button type="button" id="closeScan">关闭扫码</button></div><input id="scanPhoto" type="file" accept="image/*" hidden></dialog>
 <dialog id="backupPanel"><h2>数据备份</h2><p>数据保存在当前浏览器。换设备或清除浏览器数据前，请先导出。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
 <dialog id="logPanel"><div class="row"><h2>操作日志</h2><button id="closeLog">关闭</button></div><ul id="logList"></ul></dialog>
 <script>
@@ -366,18 +369,45 @@ function stopScan() {
   $('scanVideo').srcObject = null;
 }
 
+function createBarcodeDecoder(Reader) {
+  const reader = new Reader();
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d',{willReadFrequently:true});
+  return (source,width,height,rotation) => {
+    const sideways = rotation % 180 !== 0;
+    canvas.width = sideways ? height : width;
+    canvas.height = sideways ? width : height;
+    context.translate(canvas.width/2,canvas.height/2);
+    context.rotate(rotation*Math.PI/180);
+    context.drawImage(source,-width/2,-height/2,width,height);
+    try {
+      const value = reader.decodeFromCanvas(canvas).getText().trim();
+      return validItemCode(value) ? value : '';
+    } catch (error) {
+      if (error instanceof TypeError) throw error;
+      return ''; // No readable barcode in this frame.
+    }
+  };
+}
+
+function fillScannedCode(value) {
+  $('form').elements.namedItem('serial').value = value;
+  stopScan();
+  $('scanPanel').close();
+}
+
 async function openScan() {
   stopScan();
   const session = {};
   scanSession = session;
   const video = $('scanVideo');
-  const panel = $('scanPanel');
-  $('scanStatus').textContent = '正在打开相机…';
-  panel.showModal();
+  const status = $('scanStatus');
+  status.textContent = '正在打开相机…';
+  $('scanPanel').showModal();
   try {
-    if (!navigator.mediaDevices?.getUserMedia) throw Error('当前浏览器无法打开相机，请用 Safari 打开网站或手动输入。');
+    if (!navigator.mediaDevices?.getUserMedia) throw Error('Camera unavailable');
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio:false, video:{facingMode:{ideal:'environment'},width:{ideal:1280}}
+      audio:false, video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}
     });
     if (scanSession !== session) {
       stream.getTracks().forEach(track => track.stop());
@@ -387,42 +417,81 @@ async function openScan() {
     video.srcObject = stream;
     await video.play();
     if (scanSession !== session) return;
+    status.textContent = '正在加载扫码组件…';
     const Reader = await loadScanner();
     if (scanSession !== session) return;
-    const reader = new Reader();
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d',{willReadFrequently:true});
-    $('scanStatus').textContent = '把条形码或二维码放进画面。';
+    const decode = createBarcodeDecoder(Reader);
+    const started = Date.now();
+    let rotation = 0;
+    status.textContent = '将完整条码放在框内，横竖都可以。';
     const scanFrame = () => {
       if (scanSession !== session) return;
-      let result;
-      if (video.readyState >= 2 && video.videoWidth) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        context.drawImage(video,0,0);
-        try { result = reader.decodeFromCanvas(canvas); } catch { /* No readable code in this frame. */ }
-      }
-      if (result) {
-        const value = result.getText().trim();
-        if (validItemCode(value)) {
-          $('form').elements.namedItem('serial').value = value;
-          stopScan();
-          panel.close();
-          return;
+      try {
+        if (!session.readingPhoto && video.readyState >= 2 && video.videoWidth) {
+          const value = decode(video,video.videoWidth,video.videoHeight,rotation);
+          if (value) { fillScannedCode(value); return; }
+          rotation = rotation === 0 ? 90 : 0;
+          if (Date.now() - started > 5500 && !session.hintShown) {
+            status.textContent = '试试离标签稍远一点，避开反光，或从照片识别。';
+            session.hintShown = true;
+          }
         }
-        $('scanStatus').textContent = '无法识别有效物品编号，请换一个码。';
+        session.timer = setTimeout(scanFrame,160);
+      } catch {
+        stopScan();
+        status.textContent = '实时扫码暂不可用，可从照片识别或手动填写。';
       }
-      session.timer = setTimeout(scanFrame,250);
     };
     scanFrame();
   } catch (error) {
     if (scanSession !== session) return;
     stopScan();
-    $('scanStatus').textContent = error.name === 'NotAllowedError'
-      ? '相机权限未开启，请允许 Safari 使用相机，或关闭扫码后手动输入。'
-      : '相机或扫码组件暂不可用，可关闭扫码后手动输入。';
+    status.textContent = error.name === 'NotAllowedError'
+      ? '相机权限未开启，可从照片识别或手动填写。'
+      : '相机或扫码组件暂不可用，可从照片识别或手动填写。';
   }
 }
+
+$('pickScanPhoto').onclick = () => $('scanPhoto').click();
+$('scanPhoto').onchange = async event => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  const panel = $('scanPanel');
+  if (!file || !panel.open) return;
+  // Give each photo attempt its own identity so a late result cannot fill a reopened form.
+  const session = scanSession || (scanSession = {});
+  const attempt = {};
+  session.readingPhoto = attempt;
+  const status = $('scanStatus');
+  status.textContent = '正在识别照片…';
+  const url = URL.createObjectURL(file);
+  try {
+    const photo = new Image();
+    const loaded = new Promise((resolve,reject) => {
+      photo.onload = resolve;
+      photo.onerror = reject;
+    });
+    photo.src = url;
+    const [Reader] = await Promise.all([loadScanner(),loaded]);
+    if (scanSession !== session || session.readingPhoto !== attempt) return;
+    const decode = createBarcodeDecoder(Reader);
+    const scale = Math.min(1,1920/Math.max(photo.naturalWidth,photo.naturalHeight));
+    const width = Math.max(1,Math.round(photo.naturalWidth*scale));
+    const height = Math.max(1,Math.round(photo.naturalHeight*scale));
+    for (const rotation of [0,90,180,270]) {
+      const value = decode(photo,width,height,rotation);
+      if (value) { fillScannedCode(value); return; }
+    }
+    status.textContent = '照片里没有识别到编号，试试裁到只剩一张清晰的标签。';
+  } catch {
+    if (scanSession === session && session.readingPhoto === attempt) {
+      status.textContent = '无法识别这张照片，请换一张或手动填写。';
+    }
+  } finally {
+    URL.revokeObjectURL(url);
+    if (session.readingPhoto === attempt) session.readingPhoto = null;
+  }
+};
 
 $('fields').addEventListener('click',event => {
   const button = event.target.closest('button[data-scan]');
