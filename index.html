@@ -12,6 +12,7 @@
 #scanStatus{min-height:2.8em}
 .more{position:relative}.more summary{list-style:none;cursor:pointer;display:grid;place-items:center;min-width:44px;min-height:44px;border-radius:12px;background:#e6eefb;color:var(--blue);font-weight:700}.more summary::-webkit-details-marker{display:none}.more-options{position:absolute;right:0;top:calc(100% + 6px);z-index:2;min-width:132px;display:grid;gap:6px;background:white;padding:6px;border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 20px #172d4926}#logList{padding:0;list-style:none}#logList li{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}#logList time{display:block;color:#4c607c;font-size:14px;margin-top:4px}
 .search-input{position:relative;display:block}.search-input svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--blue);pointer-events:none}.search-input input{padding-left:38px}
+.required-mark{color:#b12424;font-weight:700}.fields{align-items:start}.problem-option{display:flex;align-items:center;gap:10px;min-height:44px}.problem-option input{width:20px;height:20px;min-height:0;margin:0;accent-color:#b12424}.record-tags{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.problem-tag{color:#a21b1b;background:#ffe6e5;font-weight:700}
 </style>
 <main>
 <header><h1>拍机堂出入库</h1><details class="more" id="more"><summary aria-label="更多">•••</summary><div class="more-options"><button id="backup">数据备份</button><button id="logs">日志</button></div></details></header>
@@ -44,6 +45,8 @@ const money = cents => '¥' + (cents/100).toLocaleString('zh-CN',{minimumFractio
 const status = item => item.service?.state === 'returned' ? 'returned' : item.service?.state ?? (item.sale ? 'sold' : 'available');
 const inStock = item => !item.sale || status(item) === 'returned';
 const activeSale = item => item.sale && status(item) !== 'returned';
+const imeiPattern = /^\d{15}$/;
+const itemNumberPattern = /^\d{20}$/;
 let page = 'stock';
 let storageError = false;
 let source = null;
@@ -76,7 +79,7 @@ function validate(data) {
   for (const item of data) {
     if (!item || typeof item.id !== 'string' || !/^[\w-]+$/.test(item.id) || ids.has(item.id) ||
         typeof item.model !== 'string' || !item.model.trim() || typeof item.imei !== 'string' ||
-        !/^\d{15}$/.test(item.imei) || imeis.has(item.imei) || typeof item.serial !== 'string' ||
+        !imeiPattern.test(item.imei) || imeis.has(item.imei) || typeof item.serial !== 'string' ||
         !validItemCode(item.serial) || serials.has(item.serial.toUpperCase()) || !amount(item.cost) ||
         (item.inbound !== null && !date(item.inbound)) ||
         (item.sale && (!date(item.sale.date) || !amount(item.sale.price) || item.sale.date < item.inbound)) ||
@@ -159,7 +162,7 @@ function card(item) {
     if (!item.service) buttons += action('删除出库','deleteSale',item,'danger');
   }
   if (page === 'service') buttons = action('编辑 / 标记状态','service',item) + action('删除售后','deleteService',item,'danger');
-  return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><span class="tag">${states[status(item)]}</span></div>
+  return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><div class="record-tags">${item.problem === true && (page === 'stock' || page === 'inbound') ? '<span class="tag problem-tag">问题机</span>' : ''}<span class="tag">${states[status(item)]}</span></div></div>
     <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(item.serial)}</p>
     <p>成本 ${money(item.cost)} ${escape(item.channel || '')}</p>
     ${saleInfo}${tracking}${serviceInfo}${historyInfo}<p class="muted">${escape(item.note || '')}</p>
@@ -203,13 +206,15 @@ function render() {
   }).join('') || '<p class="empty">'+(storageError ? '本机数据无法读取，请从有效备份恢复。' : '暂无符合条件的记录。')+'</p>';
 }
 
+const requiredMark = '<span class="required-mark" aria-hidden="true"> *</span>';
+
 function field(name,label,value='',attrs='',type='text') {
-  return `<label>${label}<input name="${name}" type="${type}" value="${escape(value)}" ${attrs}></label>`;
+  return `<label><span>${label}${['imei','serial','cost'].includes(name) ? requiredMark : ''}</span><input name="${name}" type="${type}" value="${escape(value)}" ${attrs}></label>`;
 }
 function choice(name,label,options,current,defaultValue) {
   const value = current || defaultValue;
   const values = options.includes(value) ? options : [...options, value];
-  return `<label>${label}<select name="${name}">${values.map(option =>
+  return `<label><span>${label}${name === 'model' ? requiredMark : ''}</span><select name="${name}"${name === 'model' ? ' required' : ''}>${values.map(option =>
     `<option value="${escape(option)}" ${option === value ? 'selected' : ''}>${escape(option)}</option>`
   ).join('')}</select></label>`;
 }
@@ -232,7 +237,7 @@ function syncCustomChoice(select) {
 }
 
 function itemCodeField(value) {
-  return `<div class="scan-field">${field('serial','物品编号',value,'required maxlength="128" autocapitalize="off" spellcheck="false"')}
+  return `<div class="scan-field">${field('serial','物品编号',value,'required inputmode="numeric" autocapitalize="off" spellcheck="false"')}
     <button type="button" data-scan aria-label="扫码录入物品编号">扫码录入</button></div>`;
 }
 
@@ -253,12 +258,13 @@ function openForm(next,item) {
   if (deviceFields) {
     html += customChoice('model','型号',['原机','原机Wi-Fi'],item?.model,'原机') +
       choice('capacity','容量',['32','128','256'],item?.capacity,'128') +
-      field('imei','IMEI',item?.imei,'required inputmode="numeric" pattern="[0-9]{15}" maxlength="15"') +
+      field('imei','IMEI',item?.imei,'required inputmode="numeric"') +
       itemCodeField(item?.serial) +
       amount('cost','成本（元）',item?.cost) +
       customChoice('channel','进货渠道',['拍机堂'],item?.channel,'拍机堂');
     if (mode === 'device' && (!item || item.inbound)) html += field('inbound','入库日期',item?.inbound || today(),'required','date');
-    html += note(item?.note ?? '');
+    html += `<label class="wide problem-option"><input type="checkbox" name="problem"${item?.problem === true ? ' checked' : ''}>问题机</label>` +
+      note(item?.note ?? '');
   }
   if (selling) {
     html += field('date','出库日期',sale?.date || today(),'required','date') +
@@ -272,6 +278,7 @@ function openForm(next,item) {
         `<option value="${state}" ${service?.state === state ? 'selected' : ''}>${states[state]}</option>`).join('')}</select></label>` +
       note(service?.note ?? '');
   }
+  $('form').noValidate = deviceFields;
   $('fields').innerHTML = html;
   for (const select of $('fields').querySelectorAll('select[name="model"], select[name="channel"]')) {
     syncCustomChoice(select);
@@ -283,10 +290,22 @@ function openForm(next,item) {
 $('form').addEventListener('submit',event => {
   event.preventDefault();
   const values = Object.fromEntries([...new FormData(event.target)].map(([name,value]) => [name,value.trim()]));
+  if (mode === 'device' || mode === 'direct') {
+    for (const [name,pattern,message] of [
+      ['imei',imeiPattern,'IMEI 必须是 15 位数字。'],
+      ['serial',itemNumberPattern,'物品编号必须是 20 位数字。']
+    ]) {
+      if (pattern.test(values[name] ?? '')) continue;
+      alert(message);
+      event.target.elements.namedItem(name).focus();
+      return;
+    }
+    if (!event.target.reportValidity()) return;
+  }
   try {
     const item = selected ? {...selected} : {id:crypto.randomUUID(),inbound:null};
     if (mode === 'device' || mode === 'direct') Object.assign(item,{
-      model:values.model === '其他' ? values.modelCustom || '其他' : values.model, capacity:values.capacity, imei:values.imei, serial:values.serial,
+      model:values.model === '其他' ? values.modelCustom || '其他' : values.model, capacity:values.capacity, imei:values.imei, serial:values.serial, problem:values.problem === 'on',
       cost:Math.round(Number(values.cost)*100), channel:values.channel === '其他' ? values.channelCustom || '其他' : values.channel, note:values.note, inbound:mode === 'direct' ? null : values.inbound || item.inbound
     });
     if (mode === 'sell' && item.service?.state === 'returned') {
@@ -382,7 +401,7 @@ function createBarcodeDecoder(Reader) {
     context.drawImage(source,-width/2,-height/2,width,height);
     try {
       const value = reader.decodeFromCanvas(canvas).getText().trim();
-      return validItemCode(value) ? value : '';
+      return itemNumberPattern.test(value) ? value : '';
     } catch (error) {
       if (error instanceof TypeError) throw error;
       return ''; // No readable barcode in this frame.
@@ -423,7 +442,7 @@ async function openScan() {
     const decode = createBarcodeDecoder(Reader);
     const started = Date.now();
     let rotation = 0;
-    status.textContent = '将完整条码放在框内，横竖都可以。';
+    status.textContent = '将 20 位物品编号的条码放在框内，横竖都可以。';
     const scanFrame = () => {
       if (scanSession !== session) return;
       try {
@@ -482,7 +501,7 @@ $('scanPhoto').onchange = async event => {
       const value = decode(photo,width,height,rotation);
       if (value) { fillScannedCode(value); return; }
     }
-    status.textContent = '照片里没有识别到编号，试试裁到只剩一张清晰的标签。';
+    status.textContent = '照片里没有识别到 20 位物品编号，试试裁到只剩一张清晰的标签。';
   } catch {
     if (scanSession === session && session.readingPhoto === attempt) {
       status.textContent = '无法识别这张照片，请换一张或手动填写。';
