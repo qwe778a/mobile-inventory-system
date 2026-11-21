@@ -2,14 +2,14 @@
 <html lang="zh-CN">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>手机进销存</title>
+<title>拍机堂出入库</title>
 <style>
 :root{font:16px system-ui,-apple-system,sans-serif;color:#172d29;background:#f4f6f2;--green:#124d40;--line:#dce5dd}
 *{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eee7;color:var(--green);font-weight:650}button.primary{background:var(--green);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#536961}.hero{margin:22px 0;background:var(--green);color:white;border-radius:22px;padding:20px}.hero small{color:#d3e9df}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eee7;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#dcebe1}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102d25aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
 .scan-field{display:grid;gap:6px;align-content:start;min-width:0}.scan-field button{justify-self:start}#scanVideo{width:100%;max-height:42dvh;object-fit:contain;background:#172d29;border-radius:12px}
 </style>
 <main>
-<header><h1>手机进销存</h1><button id="backup">数据备份</button></header>
+<header><h1>拍机堂出入库</h1><button id="backup">数据备份</button></header>
 <section class="hero" aria-label="统计"><small id="summaryTitle"></small><div class="metrics" id="metrics"></div></section>
 <div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button></div>
 <div class="filters">
@@ -23,7 +23,7 @@
 </main>
 <nav aria-label="功能"><div id="tabs"></div></nav>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
-<dialog id="scanPanel"><h2 id="scanTitle"></h2><p id="scanStatus" role="status"></p><video id="scanVideo" autoplay playsinline muted></video><div class="actions"><button type="button" id="closeScan">关闭扫码</button></div></dialog>
+<dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><video id="scanVideo" autoplay playsinline muted></video><div class="actions"><button type="button" id="closeScan">关闭扫码</button></div></dialog>
 <dialog id="backupPanel"><h2>数据备份</h2><p>数据保存在当前浏览器。换设备或清除浏览器数据前，请先导出。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
 <script>
 'use strict';
@@ -187,9 +187,26 @@ function choice(name,label,options,current,defaultValue) {
   ).join('')}</select></label>`;
 }
 
-function scanField(name,label,value,attrs) {
-  return `<div class="scan-field">${field(name,label,value,attrs)}
-    <button type="button" data-scan="${name}" aria-label="扫码录入${label}">扫码录入</button></div>`;
+function customChoice(name,label,options,current,defaultValue) {
+  const custom = current && current !== '其他' && !options.includes(current) ? current : '';
+  const selected = custom ? '其他' : current;
+  return `<div class="scan-field">${choice(name,label,[...options,'其他'],selected,defaultValue)}
+    <div${selected === '其他' ? '' : ' hidden'}>
+      ${field(name+'Custom','自定义'+label,custom,'maxlength="80"')}
+    </div></div>`;
+}
+
+function syncCustomChoice(select) {
+  const input = select.form.elements.namedItem(select.name+'Custom');
+  if (!input) return;
+  const isCustom = select.value === '其他';
+  input.closest('label').parentElement.hidden = !isCustom;
+  input.disabled = !isCustom;
+}
+
+function itemCodeField(value) {
+  return `<div class="scan-field">${field('serial','物品编号',value,'required maxlength="128" autocapitalize="off" spellcheck="false"')}
+    <button type="button" data-scan aria-label="扫码录入物品编号">扫码录入</button></div>`;
 }
 
 function note(value) {
@@ -207,12 +224,12 @@ function openForm(next,item) {
   $('formTitle').textContent = {device:item ? '编辑设备' : '新增入库',sell:'标记售出',direct:'直接登记出库',saleEdit:'编辑出库',service:'售后登记'}[mode];
   let html = '';
   if (deviceFields) {
-    html += choice('model','型号',['原机','原机Wi-Fi','其他'],item?.model,'原机') +
+    html += customChoice('model','型号',['原机','原机Wi-Fi'],item?.model,'原机') +
       choice('capacity','容量',['32','128','256'],item?.capacity,'128') +
-      scanField('imei','IMEI',item?.imei,'required inputmode="numeric" pattern="[0-9]{15}" maxlength="15"') +
-      scanField('serial','物品编号',item?.serial,'required maxlength="128" autocapitalize="off" spellcheck="false"') +
+      field('imei','IMEI',item?.imei,'required inputmode="numeric" pattern="[0-9]{15}" maxlength="15"') +
+      itemCodeField(item?.serial) +
       amount('cost','成本（元）',item?.cost) +
-      choice('channel','进货渠道',['拍机堂','其他'],item?.channel,'拍机堂');
+      customChoice('channel','进货渠道',['拍机堂'],item?.channel,'拍机堂');
     if (mode === 'device' && (!item || item.inbound)) html += field('inbound','入库日期',item?.inbound || today(),'required','date');
     html += note(item?.note ?? '');
   }
@@ -229,6 +246,9 @@ function openForm(next,item) {
       note(service?.note ?? '');
   }
   $('fields').innerHTML = html;
+  for (const select of $('fields').querySelectorAll('select[name="model"], select[name="channel"]')) {
+    syncCustomChoice(select);
+  }
   $('notice').textContent = '';
   $('editor').showModal();
 }
@@ -239,8 +259,8 @@ $('form').addEventListener('submit',event => {
   try {
     const item = selected ? {...selected} : {id:crypto.randomUUID(),inbound:null};
     if (mode === 'device' || mode === 'direct') Object.assign(item,{
-      model:values.model, capacity:values.capacity, imei:values.imei, serial:values.serial,
-      cost:Math.round(Number(values.cost)*100), channel:values.channel, note:values.note, inbound:mode === 'direct' ? null : values.inbound || item.inbound
+      model:values.model === '其他' ? values.modelCustom || '其他' : values.model, capacity:values.capacity, imei:values.imei, serial:values.serial,
+      cost:Math.round(Number(values.cost)*100), channel:values.channel === '其他' ? values.channelCustom || '其他' : values.channel, note:values.note, inbound:mode === 'direct' ? null : values.inbound || item.inbound
     });
     if (mode === 'sell' && item.service?.state === 'returned') {
       if (values.date < item.service.date) throw Error('再次出库日期应晚于或等于回库日期');
@@ -316,21 +336,12 @@ function stopScan() {
   $('scanVideo').srcObject = null;
 }
 
-function scanValue(name,raw) {
-  const value = raw.trim();
-  if (name === 'serial') return validItemCode(value) ? value : '';
-  if (/^\d{15}$/.test(value)) return value;
-  const matches = [...value.matchAll(/(?:^|[^A-Z0-9])IMEI\s*[:：]?\s*(\d{15})(?!\d)/gi)];
-  return matches.length === 1 ? matches[0][1] : '';
-}
-
-async function openScan(name) {
+async function openScan() {
   stopScan();
   const session = {};
   scanSession = session;
   const video = $('scanVideo');
   const panel = $('scanPanel');
-  $('scanTitle').textContent = name === 'imei' ? '扫码录入 IMEI' : '扫码录入物品编号';
   $('scanStatus').textContent = '正在打开相机…';
   panel.showModal();
   try {
@@ -362,14 +373,14 @@ async function openScan(name) {
         try { result = reader.decodeFromCanvas(canvas); } catch { /* No readable code in this frame. */ }
       }
       if (result) {
-        const value = scanValue(name,result.getText());
-        if (value) {
-          $('form').elements.namedItem(name).value = value;
+        const value = result.getText().trim();
+        if (validItemCode(value)) {
+          $('form').elements.namedItem('serial').value = value;
           stopScan();
           panel.close();
           return;
         }
-        $('scanStatus').textContent = name === 'imei' ? '请对准包含 15 位 IMEI 的码。' : '无法识别有效物品编号，请换一个码。';
+        $('scanStatus').textContent = '无法识别有效物品编号，请换一个码。';
       }
       session.timer = setTimeout(scanFrame,250);
     };
@@ -385,7 +396,10 @@ async function openScan(name) {
 
 $('fields').addEventListener('click',event => {
   const button = event.target.closest('button[data-scan]');
-  if (button) openScan(button.dataset.scan);
+  if (button) openScan();
+});
+$('fields').addEventListener('change',event => {
+  if (event.target.matches('select[name="model"], select[name="channel"]')) syncCustomChoice(event.target);
 });
 $('closeScan').onclick = () => {
   stopScan();
@@ -414,7 +428,7 @@ $('export').onclick = () => {
   const url = URL.createObjectURL(new Blob([JSON.stringify({version:1,items},null,2)],{type:'application/json'}));
   const link = document.createElement('a');
   link.href = url;
-  link.download = '手机进销存-'+today()+'.json';
+  link.download = '拍机堂出入库-'+today()+'.json';
   document.body.append(link);
   link.click();
   link.remove();
