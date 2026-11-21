@@ -19,12 +19,28 @@
 @media(min-width:680px){.hub-options{grid-template-columns:repeat(2,minmax(0,1fr))}.drop-layout{display:grid;grid-template-columns:170px minmax(0,1fr);gap:18px}.drop-sidebar{align-self:start;margin:0}.drop-menu-button{display:none}}
 .drop-service-button{display:inline-flex;align-items:center;gap:6px}.drop-service-button svg{flex:none;width:17px;height:17px}.drop-service-tag{color:#a21b1b;background:#ffe6e5;font-weight:700}#dropServiceError{color:#9a301e}
 .sale-address{margin:8px 0}.sale-address summary{cursor:pointer;color:var(--blue)}.sale-address p{white-space:pre-wrap}
+#expenses{max-width:560px}
+.expense-summary{margin:16px 0;padding:16px 20px}
+.expense-summary strong{display:block;font-size:28px;margin-top:4px;overflow-wrap:anywhere}
+.expense-calendar{background:white;border:1px solid var(--line);border-radius:16px;padding:10px}
+.expense-calendar .row{margin-bottom:10px;text-align:center}
+.expense-calendar .row h2{font-size:18px}
+.expense-calendar .row button{flex:none;padding-inline:9px}
+.expense-week,.expense-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
+.expense-week{text-align:center;font-size:13px;margin-bottom:6px}
+.expense-day{min-width:0;min-height:52px;padding:4px 1px;background:#f2f6fc;display:grid;justify-items:center;align-content:center;gap:3px;border-radius:8px}
+.expense-day.has-expense{background:#e1edff}
+.expense-day[aria-current="date"]{box-shadow:inset 0 0 0 2px var(--blue)}
+.expense-day small{font-size:12px;line-height:1.15;font-weight:600;color:inherit;overflow-wrap:anywhere;max-width:100%}
+#expenseReadError,#expenseError{color:#9a301e}
+#expenseEditor label{margin-top:12px}
 </style>
 <main id="hub" class="hub">
 <h1 tabindex="-1">闲鱼</h1>
 <div class="hub-options">
   <button class="hub-option" id="openInventory"><span><strong>拍机堂</strong><small>管理库存、入库、出库与售后</small></span><span class="arrow" aria-hidden="true">›</span></button>
   <button class="hub-option" id="openDropship"><span><strong>代发</strong><small>管理代发订单、发货状态与利润</small></span><span class="arrow" aria-hidden="true">›</span></button>
+  <button class="hub-option" id="openExpenses" type="button"><span><strong>超擦支出</strong><small>记录每日金额，查看每月总支出</small></span><span class="arrow" aria-hidden="true">›</span></button>
 </div>
 </main>
 <main id="inventory" hidden>
@@ -55,6 +71,30 @@
   <section id="dropLogs" aria-labelledby="dropLogsHeading" hidden><h2 id="dropLogsHeading">操作日志</h2><ul id="dropLogRows" class="drop-log"></ul></section>
 </div>
 </main>
+<main id="expenses" hidden>
+<header><div class="inventory-title"><button type="button" data-home>首页</button><h1 tabindex="-1">超擦支出</h1></div></header>
+<section class="hero expense-summary" aria-label="月度支出汇总">
+  <small>当月总支出</small><strong id="expenseTotal" aria-live="polite"></strong>
+</section>
+<section class="expense-calendar" aria-labelledby="expenseMonth">
+  <div class="row"><button id="expensePrev" type="button">上月</button><h2 id="expenseMonth" aria-live="polite"></h2><button id="expenseNext" type="button">下月</button></div>
+  <div class="expense-week muted" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+  <div class="expense-days" id="expenseDays"></div>
+</section>
+<p id="expenseReadError" role="alert" hidden></p>
+</main>
+<dialog id="expenseEditor" aria-labelledby="expenseDateHeading">
+<h2 id="expenseDateHeading"></h2>
+<form id="expenseForm">
+  <label>当天支出（元）<input id="expenseAmount" type="number" inputmode="decimal" min="0" max="9999999.99" step="0.01" required></label>
+  <output id="expenseError" role="alert"></output>
+  <div class="actions">
+    <button class="primary" type="submit">保存</button>
+    <button id="expenseCancel" type="button">取消</button>
+    <button id="expenseClear" type="button" class="danger" hidden>清除金额</button>
+  </div>
+</form>
+</dialog>
 <dialog id="dropEditor"><h2 id="dropFormTitle">新增代发订单</h2>
 <form id="dropForm"><div class="fields">
   <label>网络<select name="network" required><option value="">请选择网络</option><option>Wi-Fi</option><option>插卡</option><option>无锁Wi-Fi</option><option>无锁插卡</option></select></label>
@@ -744,7 +784,7 @@ tab(page);
   }
 
   function showModule(id) {
-    for (const panel of ['hub','inventory','dropship']) $(panel).hidden = panel !== id;
+    for (const panel of ['hub','inventory','dropship','expenses']) $(panel).hidden = panel !== id;
     $('inventoryNav').hidden = id !== 'inventory';
     if (id === 'dropship') setSidebar(false);
     window.scrollTo(0,0);
@@ -829,6 +869,105 @@ tab(page);
     }
     $('dropEditor').showModal();
   }
+
+  const expenseKey = 'daily-extra-expenses-v1';
+  const monthLabel = new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'long'});
+  const maxExpense = 999999999;
+  let expenseMonth;
+  let expenseDate;
+  let expenseRecords = {};
+
+  function readExpenses() {
+    const records = JSON.parse(localStorage.getItem(expenseKey) ?? '{}');
+    if (!records || typeof records !== 'object' || Array.isArray(records) ||
+        Object.entries(records).some(([day,value]) => !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
+          !Number.isSafeInteger(value) || value < 0 || value > maxExpense)) {
+      throw Error('无法读取支出记录。');
+    }
+    return records;
+  }
+
+  function renderExpenses() {
+    const year = expenseMonth.getFullYear();
+    const month = expenseMonth.getMonth();
+    const prefix = `${year}-${String(month + 1).padStart(2,'0')}-`;
+    const offset = (expenseMonth.getDay() + 6) % 7;
+    const count = new Date(year,month+1,0).getDate();
+    $('expenseMonth').textContent = monthLabel.format(expenseMonth);
+    try {
+      expenseRecords = readExpenses();
+      $('expenseReadError').hidden = true;
+    } catch {
+      $('expenseReadError').textContent = '无法读取本机支出记录，请刷新后重试。';
+      $('expenseReadError').hidden = false;
+      $('expenseTotal').textContent = '—';
+      $('expenseDays').replaceChildren();
+      return;
+    }
+    const total = Object.entries(expenseRecords).reduce((sum,[day,cents]) =>
+      day.startsWith(prefix) ? sum + cents : sum,0);
+    $('expenseTotal').textContent = money(total);
+    const currentDay = today();
+    const days = Array.from({length:count},(_,index) => {
+      const day = index + 1;
+      const date = prefix + String(day).padStart(2,'0');
+      const amount = Object.hasOwn(expenseRecords,date) ? money(expenseRecords[date]) : '';
+      const label = date + (amount ? '，支出' + amount : '，填写支出');
+      return `<button class="expense-day${amount ? ' has-expense' : ''}" type="button" data-expense-date="${date}"
+        aria-label="${label}" ${date === currentDay ? 'aria-current="date"' : ''}>
+        <span>${day}</span>${amount ? `<small>${amount}</small>` : ''}</button>`;
+    });
+    $('expenseDays').innerHTML = '<span aria-hidden="true"></span>'.repeat(offset) + days.join('');
+  }
+
+  function shiftExpenseMonth(change) {
+    expenseMonth = new Date(expenseMonth.getFullYear(),expenseMonth.getMonth()+change,1);
+    renderExpenses();
+  }
+
+  function saveExpense(cents) {
+    try {
+      const next = readExpenses();
+      if (cents === null) delete next[expenseDate];
+      else next[expenseDate] = cents;
+      localStorage.setItem(expenseKey,JSON.stringify(next));
+    } catch {
+      $('expenseError').textContent = '无法保存支出，请检查浏览器存储后重试。';
+      return;
+    }
+    $('expenseEditor').close();
+    renderExpenses();
+    $('expenseDays').querySelector(`[data-expense-date="${expenseDate}"]`)?.focus();
+  }
+
+  $('openExpenses').onclick = () => {
+    const now = new Date();
+    expenseMonth = new Date(now.getFullYear(),now.getMonth(),1);
+    renderExpenses();
+    showModule('expenses');
+  };
+  $('expensePrev').onclick = () => shiftExpenseMonth(-1);
+  $('expenseNext').onclick = () => shiftExpenseMonth(1);
+  $('expenseDays').onclick = event => {
+    const date = event.target.closest('[data-expense-date]')?.dataset.expenseDate;
+    if (!date) return;
+    expenseDate = date;
+    const exists = Object.hasOwn(expenseRecords,date);
+    $('expenseDateHeading').textContent = date;
+    $('expenseAmount').value = exists ? (expenseRecords[date]/100).toFixed(2) : '';
+    $('expenseClear').hidden = !exists;
+    $('expenseError').textContent = '';
+    $('expenseEditor').showModal();
+  };
+  $('expenseCancel').onclick = () => $('expenseEditor').close();
+  $('expenseClear').onclick = () => saveExpense(null);
+  $('expenseForm').onsubmit = event => {
+    event.preventDefault();
+    saveExpense(Math.round($('expenseAmount').valueAsNumber*100));
+  };
+  window.addEventListener('storage',event => {
+    if (!$('expenses').hidden && (event.key === expenseKey || event.key === null)) renderExpenses();
+  });
 
   $('openInventory').onclick = () => showModule('inventory');
   $('openDropship').onclick = () => { showDropView('orders'); showModule('dropship'); };
