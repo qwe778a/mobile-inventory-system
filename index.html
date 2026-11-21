@@ -18,6 +18,7 @@
 .inventory-title{display:flex;gap:8px;align-items:center}.inventory-title h1{font-size:clamp(19px,5vw,26px)}.drop-shell{max-width:1060px}.drop-sidebar{display:grid;gap:8px;margin:12px 0;padding:10px;background:#213958;border-radius:16px}.drop-sidebar button{text-align:left;background:transparent;color:#fff}.drop-sidebar button[aria-current=true]{background:#36557b}.drop-layout{margin-top:20px}.drop-layout section{min-width:0}.drop-layout article .actions{margin-top:12px}.drop-layout h2{overflow-wrap:anywhere}.drop-metrics{margin:12px 0 18px}.drop-metrics .metric{background:#e6eefb}.drop-log{list-style:none;padding:0}.drop-log li{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}#dropError{color:#9a301e}.drop-details{display:grid;grid-template-columns:auto 1fr;gap:8px 14px}.drop-details dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
 @media(min-width:680px){.hub-options{grid-template-columns:repeat(2,minmax(0,1fr))}.drop-layout{display:grid;grid-template-columns:170px minmax(0,1fr);gap:18px}.drop-sidebar{align-self:start;margin:0}.drop-menu-button{display:none}}
 .drop-service-button{display:inline-flex;align-items:center;gap:6px}.drop-service-button svg{flex:none;width:17px;height:17px}.drop-service-tag{color:#a21b1b;background:#ffe6e5;font-weight:700}#dropServiceError{color:#9a301e}
+.sale-address{margin:8px 0}.sale-address summary{cursor:pointer;color:var(--blue)}.sale-address p{white-space:pre-wrap}
 </style>
 <main id="hub" class="hub">
 <h1 tabindex="-1">闲鱼</h1>
@@ -205,6 +206,8 @@ function card(item) {
   const tracking = item.sale?.tracking ? `<p class="muted">单号 ${escape(item.sale.tracking)}</p>` : '';
   const saleInfo = item.sale && page !== 'stock' && page !== 'inbound'
     ? `<p>售价 ${money(item.sale.price)} · ${escape(item.sale.channel || '未填写销售渠道')}</p>` : '';
+  const saleAddress = page === 'sold' && item.sale?.address
+    ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(item.sale.address)}</p></details>` : '';
   const serviceInfo = item.service && page === 'service'
     ? `<p>${escape(item.service.reason)}</p><p class="muted">${escape(item.service.note)}</p>` : '';
   let buttons = '';
@@ -221,7 +224,7 @@ function card(item) {
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><div class="record-tags">${item.problem === true && (page === 'stock' || page === 'inbound') ? '<span class="tag problem-tag">问题机</span>' : ''}<span class="tag">${states[status(item)]}</span></div></div>
     <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(item.serial)}</p>
     <p>成本 ${money(item.cost)} ${escape(item.channel || '')}</p>
-    ${saleInfo}${tracking}${serviceInfo}${historyInfo}<p class="muted">${escape(item.note || '')}</p>
+    ${saleInfo}${tracking}${saleAddress}${serviceInfo}${historyInfo}<p class="muted">${escape(item.note || '')}</p>
     <div class="actions">${buttons}</div></article>`;
 }
 
@@ -325,7 +328,8 @@ function openForm(next,item) {
   if (selling) {
     html += field('date','出库日期',sale?.date || today(),'required','date') +
       amount('price','售价（元）',sale?.price) + field('saleChannel','销售渠道',sale?.channel) +
-      field('tracking','单号',sale?.tracking);
+      field('tracking','单号',sale?.tracking) +
+      `<label class="wide">收货地址<textarea name="saleAddress" rows="3" maxlength="500" placeholder="可粘贴收件人、手机号和详细地址">${escape(sale?.address)}</textarea></label>`;
   }
   if (mode === 'service') {
     html = field('date','售后日期',service?.date || today(),'required','date') +
@@ -371,7 +375,7 @@ $('form').addEventListener('submit',event => {
       delete item.service;
     }
     if (['direct','sell','saleEdit'].includes(mode)) item.sale = {
-      date:values.date, price:Math.round(Number(values.price)*100), channel:values.saleChannel, tracking:values.tracking
+      date:values.date, price:Math.round(Number(values.price)*100), channel:values.saleChannel, tracking:values.tracking, address:values.saleAddress
     };
     if (mode === 'service') item.service = {date:values.date, reason:values.reason, state:values.state, note:values.note};
     const actionName = {
