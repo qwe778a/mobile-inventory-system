@@ -96,6 +96,12 @@ const $ = id => document.getElementById(id);
 const key = 'phone-inventory-v1';
 const names = {stock:'库存', inbound:'入库', sold:'出库', profit:'利润', service:'售后'};
 const states = {available:'在库', sold:'已售出', open:'售后处理中', closed:'售后已完成', returned:'退货已回库'};
+const exchangeStates = {
+  sentWaiting:'新机已寄出，旧机未取回',
+  sentReceived:'新机已寄出，旧机已取回',
+  waitingBoth:'新机未寄出，旧机未取回',
+  waitingNew:'新机未寄出，旧机已取回'
+};
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
 const money = cents => '¥' + (cents/100).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -189,11 +195,29 @@ function dateFor(item) {
   return status(item) === 'returned' && page === 'stock' ? item.service.date : item.inbound;
 }
 
+function saleCharges(item) {
+  const address = String(item.sale.address ?? '').trim();
+  const region = address.match(/北京|天津|河北|山西|内蒙古|辽宁|吉林|黑龙江|上海|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|重庆|四川|贵州|云南|西藏|陕西|甘肃|青海|宁夏|新疆|台湾|香港|澳门/)?.[0];
+  const rate = ['北京','上海'].includes(region) ? 400 :
+    ['海南','宁夏','青海'].includes(region) ? 700 :
+    ['西藏','新疆'].includes(region) ? 1500 : 300;
+  const trips = item.service?.reason === '换货' ? 3 : 1;
+  const fee = Math.round(item.sale.price * 16 / 1000);
+  const freight = rate * trips;
+  return {fee,freight,trips,region,net:item.sale.price-item.cost-fee-freight};
+}
+
 function totals(rows) {
   const sales = rows.filter(activeSale);
   const revenue = sales.reduce((sum,item) => sum + item.sale.price,0);
   const cost = sales.reduce((sum,item) => sum + item.cost,0);
-  return [['有效出库',sales.length+' 台'],['销售额',money(revenue)],['销售成本',money(cost)],['毛利润',money(revenue-cost)]];
+  const metrics = [['有效出库',sales.length+' 台'],['销售额',money(revenue)],['销售成本',money(cost)],['毛利润',money(revenue-cost)]];
+  if (page === 'profit') {
+    const charges = sales.map(saleCharges);
+    const sum = name => charges.reduce((total,item) => total+item[name],0);
+    metrics.push(['平台手续费',money(sum('fee'))],['运费',money(sum('freight'))],['实际利润',money(sum('net'))]);
+  }
+  return metrics;
 }
 
 function action(label, command, item, style = '') {
@@ -208,8 +232,11 @@ function card(item) {
     ? `<p>售价 ${money(item.sale.price)} · ${escape(item.sale.channel || '未填写销售渠道')}</p>` : '';
   const saleAddress = page === 'sold' && item.sale?.address
     ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(item.sale.address)}</p></details>` : '';
+  const charges = page === 'profit' ? saleCharges(item) : null;
+  const profitInfo = charges ? `<p><strong>实际利润 ${money(charges.net)}</strong></p>
+    <p class="muted">手续费 ${money(charges.fee)} · 运费 ${money(charges.freight)}（${charges.trips} 程${charges.region ? ' · '+charges.region : ' · 未识别地区，按 ¥3/程'}）</p>` : '';
   const serviceInfo = item.service && page === 'service'
-    ? `<p>${escape(item.service.reason)}</p><p class="muted">${escape(item.service.note)}</p>` : '';
+    ? `<p>${escape(item.service.reason)}${Object.hasOwn(exchangeStates,item.service.exchangeStatus) ? ' · '+exchangeStates[item.service.exchangeStatus] : ''}</p><p class="muted">${escape(item.service.note)}</p>` : '';
   let buttons = '';
   if (page === 'stock' || page === 'inbound') {
     buttons = action('编辑','device',item);
@@ -224,7 +251,7 @@ function card(item) {
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><div class="record-tags">${item.problem === true && (page === 'stock' || page === 'inbound') ? '<span class="tag problem-tag">问题机</span>' : ''}<span class="tag">${states[status(item)]}</span></div></div>
     <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(item.serial)}</p>
     <p>成本 ${money(item.cost)} ${escape(item.channel || '')}</p>
-    ${saleInfo}${tracking}${saleAddress}${serviceInfo}${historyInfo}<p class="muted">${escape(item.note || '')}</p>
+    ${saleInfo}${tracking}${saleAddress}${profitInfo}${serviceInfo}${historyInfo}<p class="muted">${escape(item.note || '')}</p>
     <div class="actions">${buttons}</div></article>`;
 }
 
@@ -303,6 +330,15 @@ function itemCodeField(value) {
 function note(value) {
   return `<label class="wide">备注<textarea name="note">${escape(value)}</textarea></label>`;
 }
+function syncServiceProgress() {
+  const fields = $('form').elements;
+  const exchange = fields.namedItem('reason').value === '换货';
+  $('exchangeProgress').hidden = !exchange;
+  $('returnProgress').hidden = exchange;
+  fields.namedItem('exchangeStatus').disabled = !exchange;
+  fields.namedItem('state').disabled = exchange;
+}
+
 function openForm(next,item) {
   mode = next;
   selected = item;
@@ -329,19 +365,27 @@ function openForm(next,item) {
     html += field('date','出库日期',sale?.date || today(),'required','date') +
       amount('price','售价（元）',sale?.price) + field('saleChannel','销售渠道',sale?.channel) +
       field('tracking','单号',sale?.tracking) +
-      `<label class="wide">收货地址<textarea name="saleAddress" rows="3" maxlength="500" placeholder="可粘贴收件人、手机号和详细地址">${escape(sale?.address)}</textarea></label>`;
+      `<label class="wide">收货地址<textarea name="saleAddress" rows="3" maxlength="500" placeholder="请包含省份或直辖市，用于计算运费">${escape(sale?.address)}</textarea></label>`;
   }
   if (mode === 'service') {
     html = field('date','售后日期',service?.date || today(),'required','date') +
-      field('reason','售后原因',service?.reason,'required maxlength="200"') +
-      `<label class="wide">处理状态<select name="state">${['open','closed','returned'].map(state =>
-        `<option value="${state}" ${service?.state === state ? 'selected' : ''}>${states[state]}</option>`).join('')}</select></label>` +
-      note(service?.note ?? '');
+      `<label>售后原因<select name="reason" required><option value="" disabled>请选择原因</option>
+        ${['换货','退货'].map(reason => `<option ${service?.reason === reason ? 'selected' : ''}>${reason}</option>`).join('')}</select></label>
+      <div class="wide" id="exchangeProgress"><label>处理状态<select name="exchangeStatus">
+        ${Object.entries(exchangeStates).map(([code,label]) => `<option value="${code}" ${code === (service?.exchangeStatus ?? (service?.state === 'closed' ? 'sentReceived' : 'waitingBoth')) ? 'selected' : ''}>${label}</option>`).join('')}
+      </select></label></div>
+      <div class="wide" id="returnProgress"><label>处理状态<select name="state">${['open','closed','returned'].map(state =>
+        `<option value="${state}" ${service?.state === state ? 'selected' : ''}>${states[state]}</option>`).join('')}</select></label></div>` +
+      note([service?.reason && !['换货','退货'].includes(service.reason) ? '原售后原因：'+service.reason : '',service?.note].filter(Boolean).join('\n'));
   }
   $('form').noValidate = deviceFields;
   $('fields').innerHTML = html;
   for (const select of $('fields').querySelectorAll('select[name="model"], select[name="channel"]')) {
     syncCustomChoice(select);
+  }
+  if (mode === 'service') {
+    if (!['换货','退货'].includes(service?.reason)) $('form').elements.namedItem('reason').value = '';
+    syncServiceProgress();
   }
   $('notice').textContent = '';
   $('editor').showModal();
@@ -377,10 +421,18 @@ $('form').addEventListener('submit',event => {
     if (['direct','sell','saleEdit'].includes(mode)) item.sale = {
       date:values.date, price:Math.round(Number(values.price)*100), channel:values.saleChannel, tracking:values.tracking, address:values.saleAddress
     };
-    if (mode === 'service') item.service = {date:values.date, reason:values.reason, state:values.state, note:values.note};
+    if (mode === 'service') {
+      const exchange = values.reason === '换货';
+      if (!['换货','退货'].includes(values.reason) || (exchange && !Object.hasOwn(exchangeStates,values.exchangeStatus))) {
+        throw Error('请选择售后原因和处理状态。');
+      }
+      const state = exchange ? (values.exchangeStatus === 'sentReceived' ? 'closed' : 'open') : values.state;
+      item.service = {date:values.date, reason:values.reason, state, note:values.note};
+      if (exchange) item.service.exchangeStatus = values.exchangeStatus;
+    }
     const actionName = {
       device:selected ? '编辑设备' : '新增入库', direct:'直接出库', sell:'标记售出',
-      saleEdit:'编辑出库', service:selected?.service ? '更新售后 · '+states[values.state] : '新增售后 · '+states[values.state]
+      saleEdit:'编辑出库', service:(selected?.service ? '更新售后 · ' : '新增售后 · ')+values.reason+' · '+(exchangeStates[values.exchangeStatus] ?? states[item.service?.state] ?? '')
     }[mode];
     save(selected ? items.map(old => old.id === item.id ? item : old) : [...items,item], actionName, describeItem(item));
     $('query').value = '';
@@ -578,6 +630,7 @@ $('fields').addEventListener('click',event => {
 });
 $('fields').addEventListener('change',event => {
   if (event.target.matches('select[name="model"], select[name="channel"]')) syncCustomChoice(event.target);
+  if (event.target.matches('select[name="reason"]')) syncServiceProgress();
 });
 $('closeScan').onclick = () => {
   stopScan();
