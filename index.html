@@ -65,6 +65,7 @@
   <label>快递单号<input name="tracking" maxlength="100" autocapitalize="off"></label>
   <label>下单日期<input type="date" name="date" required></label>
   <label>状态<select name="status"><option value="pending">待发货</option><option value="shipped">已发货</option><option value="done">已完成</option></select></label>
+  <label class="wide">收货地址<textarea name="address" rows="3" maxlength="500" placeholder="可粘贴收件人、手机号和详细地址"></textarea></label>
   <label class="wide">备注<textarea name="note" maxlength="1000"></textarea></label>
 </div><output id="dropError" role="alert"></output><div class="actions"><button class="primary">保存</button><button id="cancelDropOrder" type="button">取消</button></div></form></dialog>
 <dialog id="dropService" aria-labelledby="dropServiceTitle">
@@ -763,7 +764,7 @@ tab(page);
     $('dropError').textContent = '';
     form.elements.namedItem('date').value = today();
     if (order) {
-      for (const name of ['network','fingerprint','memory','supplier','tracking','date','status','note']) {
+      for (const name of ['network','fingerprint','memory','supplier','tracking','date','status','address','note']) {
         form.elements.namedItem(name).value = order[name] ?? '';
       }
       form.elements.namedItem('price').value = order.price/100;
@@ -892,7 +893,7 @@ tab(page);
       const fields = [[order.exchange ? '原配置' : '商品规格',order.product],['代发渠道',order.supplier],
         ['下单日期',order.date],['状态',statusNames[order.status]],['售后类型',Object.hasOwn(serviceNames,order.afterSales) ? serviceNames[order.afterSales] : ''],[order.exchange ? '原单号' : '快递单号',order.tracking],
         ...(order.exchange ? [['换货单号',order.exchange.tracking],['换货配置',replacementSpec(order)]] : []),
-        ['成本',money(order.cost)],['售价',money(order.price)],['单笔利润',money(order.price-order.cost)],['备注',order.note]];
+        ['成本',money(order.cost)],['售价',money(order.price)],['单笔利润',money(order.price-order.cost)],['收货地址',order.address],['备注',order.note]];
       $('dropDetailRows').innerHTML = fields.map(([label,value]) =>
         `<dt>${label}</dt><dd>${escape(value || '—')}</dd>`).join('');
       $('dropDetail').showModal();
