@@ -17,6 +17,7 @@
 .hub{max-width:860px;padding-top:clamp(35px,10vw,100px)}.hub h1{font-size:42px;color:#182844}.hub-options{display:grid;gap:14px;margin-top:24px}.hub-option{text-align:left;background:#fff;border:1px solid var(--line);padding:20px;border-radius:20px;display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:105px}.hub-option strong{display:block;font-size:22px}.hub-option small{display:block;margin-top:7px;font-weight:400}.hub-option .arrow{font-size:24px}
 .inventory-title{display:flex;gap:8px;align-items:center}.inventory-title h1{font-size:clamp(19px,5vw,26px)}.drop-shell{max-width:1060px}.drop-sidebar{display:grid;gap:8px;margin:12px 0;padding:10px;background:#213958;border-radius:16px}.drop-sidebar button{text-align:left;background:transparent;color:#fff}.drop-sidebar button[aria-current=true]{background:#36557b}.drop-layout{margin-top:20px}.drop-layout section{min-width:0}.drop-layout article .actions{margin-top:12px}.drop-layout h2{overflow-wrap:anywhere}.drop-metrics{margin:12px 0 18px}.drop-metrics .metric{background:#e6eefb}.drop-log{list-style:none;padding:0}.drop-log li{padding:10px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}#dropError{color:#9a301e}.drop-details{display:grid;grid-template-columns:auto 1fr;gap:8px 14px}.drop-details dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
 @media(min-width:680px){.hub-options{grid-template-columns:repeat(2,minmax(0,1fr))}.drop-layout{display:grid;grid-template-columns:170px minmax(0,1fr);gap:18px}.drop-sidebar{align-self:start;margin:0}.drop-menu-button{display:none}}
+.drop-service-button{display:inline-flex;align-items:center;gap:6px}.drop-service-button svg{flex:none;width:17px;height:17px}.drop-service-tag{color:#a21b1b;background:#ffe6e5;font-weight:700}#dropServiceError{color:#9a301e}
 </style>
 <main id="hub" class="hub">
 <h1 tabindex="-1">闲鱼</h1>
@@ -66,6 +67,13 @@
   <label>状态<select name="status"><option value="pending">待发货</option><option value="shipped">已发货</option><option value="done">已完成</option></select></label>
   <label class="wide">备注<textarea name="note" maxlength="1000"></textarea></label>
 </div><output id="dropError" role="alert"></output><div class="actions"><button class="primary">保存</button><button id="cancelDropOrder" type="button">取消</button></div></form></dialog>
+<dialog id="dropService" aria-labelledby="dropServiceTitle">
+<h2 id="dropServiceTitle">代发售后</h2>
+<form id="dropServiceForm">
+  <label>售后类型<select name="kind" required><option value="">请选择</option><option value="exchange">换货</option><option value="return">退货</option></select></label>
+  <output id="dropServiceError" role="alert"></output>
+  <div class="actions"><button class="primary">保存</button><button id="cancelDropService" type="button">取消</button></div>
+</form></dialog>
 <dialog id="dropDetail"><h2>订单详情</h2><dl class="drop-details" id="dropDetailRows"></dl><div class="actions"><button id="closeDropDetail" type="button">关闭</button></div></dialog>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
 <dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><div class="scan-preview"><video id="scanVideo" autoplay playsinline muted></video><div class="scan-guide" aria-hidden="true"></div></div><div class="actions"><button type="button" id="pickScanPhoto">从照片识别</button><button type="button" id="closeScan">关闭扫码</button></div><input id="scanPhoto" type="file" accept="image/*" hidden></dialog>
@@ -640,6 +648,7 @@ tab(page);
   'use strict';
   const dropKey = 'xianyu-dropship-v1';
   const statusNames = {pending:'待发货',shipped:'已发货',done:'已完成'};
+  const serviceNames = {exchange:'换货',return:'退货'};
   const nextStatus = {pending:'shipped',shipped:'done'};
   const sections = {orders:'dropOrders',profit:'dropProfit',logs:'dropLogs'};
   const phoneLayout = matchMedia('(max-width:679px)');
@@ -647,6 +656,7 @@ tab(page);
   let dropState = {orders:[],logs:[]};
   let dropStorageError = false;
   let editedId = null;
+  let serviceId = null;
 
   function readDropship() {
     try {
@@ -706,13 +716,16 @@ tab(page);
     $('dropRows').innerHTML = dropStorageError ? '<p class="empty">本机代发数据无法读取。</p>' :
       filtered.map(order => {
         const move = nextStatus[order.status];
-        return `<article><div class="row"><h3>${escape(order.product)}</h3><span class="tag">${statusNames[order.status]}</span></div>
+        return `<article><div class="row"><h3>${escape(order.product)}</h3><div class="record-tags"><span class="tag">${statusNames[order.status]}</span>${Object.hasOwn(serviceNames,order.afterSales) ? '<span class="tag drop-service-tag">售后</span>' : ''}</div></div>
           <p class="muted">${escape(order.date)} · ${escape(order.supplier)}</p>
           ${order.tracking ? `<p>快递单号 ${escape(order.tracking)}</p>` : ''}
           <div class="actions">
             <button data-drop-action="detail" data-id="${escape(order.id)}">详情</button>
             <button data-drop-action="edit" data-id="${escape(order.id)}">编辑</button>
             ${move ? `<button class="primary" data-drop-action="advance" data-id="${escape(order.id)}">标记${statusNames[move]}</button>` : ''}
+            <button class="drop-service-button" type="button" data-drop-action="service" data-id="${escape(order.id)}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10H3V4m0 6 4-4a8 8 0 1 1-2 9"/></svg>售后
+            </button>
             <button class="danger" data-drop-action="delete" data-id="${escape(order.id)}">删除</button>
           </div></article>`;
       }).join('') || '<p class="empty">暂无符合条件的代发订单。</p>';
@@ -762,6 +775,24 @@ tab(page);
   $('cancelDropOrder').onclick = () => $('dropEditor').close();
   $('closeDropDetail').onclick = () => $('dropDetail').close();
 
+  $('cancelDropService').onclick = () => $('dropService').close();
+  $('dropServiceForm').onsubmit = event => {
+    event.preventDefault();
+    const kind = event.target.elements.namedItem('kind').value;
+    const order = dropState.orders.find(order => order.id === serviceId);
+    try {
+      if (!order) throw Error('这笔订单已不存在。');
+      if (!Object.hasOwn(serviceNames,kind)) throw Error('请选择换货或退货。');
+      if (order.afterSales !== kind) {
+        const updated = {...order,afterSales:kind};
+        saveDropship(dropState.orders.map(o => o.id === serviceId ? updated : o),'售后 · '+serviceNames[kind],updated);
+      }
+      $('dropService').close();
+    } catch (error) {
+      $('dropServiceError').textContent = error.message;
+    }
+  };
+
   $('dropForm').onsubmit = event => {
     event.preventDefault();
     const values = Object.fromEntries([...new FormData(event.target)].map(([name,value]) => [name,value.trim()]));
@@ -791,9 +822,16 @@ tab(page);
     if (!order) return;
     const command = button.dataset.dropAction;
     if (command === 'edit') { openDropForm(order); return; }
+    if (command === 'service') {
+      serviceId = order.id;
+      $('dropServiceForm').elements.namedItem('kind').value = order.afterSales ?? '';
+      $('dropServiceError').textContent = '';
+      $('dropService').showModal();
+      return;
+    }
     if (command === 'detail') {
       const fields = [['商品规格',order.product],['代发渠道',order.supplier],
-        ['下单日期',order.date],['状态',statusNames[order.status]],['快递单号',order.tracking],
+        ['下单日期',order.date],['状态',statusNames[order.status]],['售后类型',Object.hasOwn(serviceNames,order.afterSales) ? serviceNames[order.afterSales] : ''],['快递单号',order.tracking],
         ['成本',money(order.cost)],['售价',money(order.price)],['单笔利润',money(order.price-order.cost)],['备注',order.note]];
       $('dropDetailRows').innerHTML = fields.map(([label,value]) =>
         `<dt>${label}</dt><dd>${escape(value || '—')}</dd>`).join('');
