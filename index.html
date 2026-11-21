@@ -37,7 +37,14 @@
 #payments{max-width:560px}
 #paymentForm{margin:0}
 #paymentForm label{min-width:0}
-#paymentError{color:#9a301e}
+#paymentError,#paymentChangeError{color:#9a301e}
+#paymentForm .fields,#paymentChangeForm .fields{margin:12px 0}
+.payment-note{white-space:pre-wrap}
+.payment-positive{color:#176239}
+.payment-negative{color:#a21b1b}
+.payment-state{display:inline-block;margin-top:4px;background:#e3f3e8}
+.payment-state.payment-negative{background:#ffe6e5}
+#paymentList .actions{margin-top:10px}
 #paymentList .row{align-items:start}
 #paymentList strong{white-space:nowrap}
 #paymentList h3{min-width:0}
@@ -94,15 +101,16 @@
 <main id="payments" hidden>
 <header><div class="inventory-title"><button type="button" data-home>首页</button><h1 tabindex="-1">货款明细</h1></div></header>
 <section class="hero expense-summary" aria-label="货款汇总">
-  <small>货款合计</small><strong id="paymentTotal" aria-live="polite"></strong>
+  <small>总金额（已扣除未支付）</small><strong id="paymentTotal" aria-live="polite"></strong>
 </section>
 <article>
   <h2>录入货款</h2>
   <form id="paymentForm">
-    <div class="fields" style="margin:12px 0">
+    <div class="fields">
       <label class="wide">款项名称<input name="paymentName" type="text" maxlength="80" required></label>
-      <label>货款日期<input name="paymentDate" type="date" required></label>
       <label>金额（元）<input name="paymentAmount" type="number" inputmode="decimal" min="0.01" max="9999999.99" step="0.01" required></label>
+      <label>款项状态<select name="paymentStatus"><option value="regular">普通货款</option><option value="unpaid">未支付（我需付款）</option></select></label>
+      <label class="wide">备注<textarea name="paymentNote" rows="2" maxlength="300"></textarea></label>
     </div>
     <button class="primary" type="submit">保存货款</button>
   </form>
@@ -113,6 +121,21 @@
   <div id="paymentList"></div>
 </section>
 </main>
+<dialog id="paymentChange" aria-labelledby="paymentChangeTitle">
+  <h2 id="paymentChangeTitle"></h2>
+  <form id="paymentChangeForm">
+    <div class="fields" id="paymentEditFields">
+      <label>款项状态<select name="status"><option value="regular">普通货款</option><option value="unpaid">未支付（我需付款）</option></select></label>
+      <label class="wide">备注<textarea name="note" rows="3" maxlength="300"></textarea></label>
+    </div>
+    <div class="fields" id="paymentSplitFields" hidden>
+      <label class="wide">第一笔金额（元）<input name="first" type="number" inputmode="decimal" min="0.01" step="0.01" disabled></label>
+      <p class="wide" id="paymentRemainder" aria-live="polite"></p>
+    </div>
+    <output id="paymentChangeError" role="alert"></output>
+    <div class="actions"><button class="primary" type="submit">保存</button><button type="button" id="paymentChangeCancel">取消</button></div>
+  </form>
+</dialog>
 <dialog id="expenseEditor" aria-labelledby="expenseDateHeading">
 <h2 id="expenseDateHeading"></h2>
 <form id="expenseForm">
@@ -1001,22 +1024,24 @@ tab(page);
 
   const paymentKey = 'goods-payments-v1';
   const paymentForm = $('paymentForm');
+  const paymentChangeForm = $('paymentChangeForm');
   const paymentError = $('paymentError');
+  const validPaymentAmount = amount => Number.isSafeInteger(amount) && amount > 0 && amount <= 999999999;
+  const readCents = field => Math.round(field.valueAsNumber * 100);
+  let paymentSelection;
 
-  function readPayments() {
-    const records = JSON.parse(localStorage.getItem(paymentKey) ?? '[]');
+  function readPayments(raw = localStorage.getItem(paymentKey)) {
+    const records = JSON.parse(raw ?? '[]');
     if (!Array.isArray(records) || records.some(record =>
-      !record || typeof record.name !== 'string' || !record.name.trim() ||
-      !validPaymentDate(record.date) || !Number.isSafeInteger(record.amount) ||
-      record.amount < 1 || record.amount > 999999999)) {
+      !record || typeof record.name !== 'string' || !record.name.trim() || !validPaymentAmount(record.amount) ||
+      (record.id !== undefined && (typeof record.id !== 'string' || !/^[\w-]+$/.test(record.id))) ||
+      (record.note !== undefined && typeof record.note !== 'string') ||
+      (record.status !== undefined && !['regular','unpaid'].includes(record.status)))) {
       throw Error('货款记录格式无效。');
     }
-    return records;
-  }
-
-  function validPaymentDate(date) {
-    return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
-      Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0,10) === date;
+    return records.map((record,index) => ({
+      ...record, id:record.id ?? `legacy-${index}`, status:record.status ?? 'regular', note:record.note ?? ''
+    }));
   }
 
   function showPaymentError(message) {
@@ -1027,12 +1052,19 @@ tab(page);
   function renderPayments() {
     try {
       const records = readPayments();
-      const total = records.reduce((sum,record) => sum + record.amount,0);
-      $('paymentTotal').textContent = money(total);
-      $('paymentList').innerHTML = records.reverse().sort((a,b) => b.date.localeCompare(a.date)).map(record =>
-        `<article><div class="row"><h3>${escape(record.name)}</h3><strong>${money(record.amount)}</strong></div>
-        <time class="muted" datetime="${record.date}">${record.date}</time></article>`
-      ).join('') || '<p class="empty">暂无货款记录。</p>';
+      const total = records.reduce((sum,record) =>
+        sum + (record.status === 'unpaid' ? -record.amount : record.amount),0);
+      $('paymentTotal').textContent = total < 0 ? '−' + money(-total) : money(total);
+      $('paymentList').innerHTML = records.reverse().map(record => {
+        const unpaid = record.status === 'unpaid';
+        const color = unpaid ? 'payment-negative' : 'payment-positive';
+        return `<article><div class="row"><h3>${escape(record.name)}</h3>
+          <strong class="${color}">${unpaid ? '−' : '+'}${money(record.amount)}</strong></div>
+          <span class="tag payment-state ${color}">${unpaid ? '未支付' : '普通货款'}</span>
+          ${record.note ? `<p class="muted payment-note">${escape(record.note)}</p>` : ''}
+          <div class="actions"><button type="button" data-payment-action="edit" data-payment-id="${record.id}">编辑</button>
+          ${record.amount > 1 ? `<button type="button" data-payment-action="split" data-payment-id="${record.id}">拆分</button>` : ''}</div></article>`;
+      }).join('') || '<p class="empty">暂无货款记录。</p>';
       showPaymentError('');
     } catch {
       $('paymentTotal').textContent = '—';
@@ -1042,29 +1074,89 @@ tab(page);
   }
 
   $('openPayments').onclick = () => {
-    if (!paymentForm.elements.paymentDate.value) paymentForm.elements.paymentDate.value = today();
     renderPayments();
     showModule('payments');
   };
   paymentForm.onsubmit = event => {
     event.preventDefault();
-    const name = paymentForm.elements.paymentName.value.trim();
-    const date = paymentForm.elements.paymentDate.value;
-    const amount = Math.round(paymentForm.elements.paymentAmount.valueAsNumber * 100);
-    if (!name || !validPaymentDate(date) || !Number.isSafeInteger(amount) || amount < 1 || amount > 999999999) {
-      showPaymentError('请填写款项名称、有效日期和大于零的金额。');
+    const fields = paymentForm.elements;
+    const name = fields.paymentName.value.trim();
+    const amount = readCents(fields.paymentAmount);
+    if (!name || !validPaymentAmount(amount)) {
+      showPaymentError('请填写款项名称和大于零的金额。');
       return;
     }
     try {
       const records = readPayments();
-      records.push({name,date,amount});
+      records.push({id:crypto.randomUUID(), name, amount, status:fields.paymentStatus.value, note:fields.paymentNote.value.trim()});
       localStorage.setItem(paymentKey,JSON.stringify(records));
     } catch {
       showPaymentError('无法保存货款，请检查浏览器存储后重试。');
       return;
     }
     paymentForm.reset();
-    paymentForm.elements.paymentDate.value = date;
+    renderPayments();
+  };
+
+  function updatePaymentRemainder() {
+    const amount = readCents(paymentChangeForm.elements.first);
+    const remainder = paymentSelection.record.amount - amount;
+    $('paymentRemainder').textContent = validPaymentAmount(amount) && remainder > 0
+      ? '第二笔金额 ' + money(remainder) : '填写第一笔金额后，自动计算第二笔。';
+  }
+
+  $('paymentList').onclick = event => {
+    const button = event.target.closest('[data-payment-action]');
+    if (!button) return;
+    try {
+      const raw = localStorage.getItem(paymentKey);
+      const record = readPayments(raw).find(entry => entry.id === button.dataset.paymentId);
+      if (!record) { renderPayments(); return; }
+      const split = button.dataset.paymentAction === 'split';
+      paymentSelection = {raw, record, split};
+      const fields = paymentChangeForm.elements;
+      paymentChangeForm.reset();
+      fields.note.value = record.note;
+      fields.status.value = record.status;
+      fields.first.disabled = !split;
+      fields.first.required = split;
+      fields.first.max = ((record.amount-1)/100).toFixed(2);
+      $('paymentEditFields').hidden = split;
+      $('paymentSplitFields').hidden = !split;
+      $('paymentChangeError').textContent = '';
+      $('paymentChangeTitle').textContent = split ? `拆分货款 ${money(record.amount)}` : '编辑备注和状态';
+      if (split) updatePaymentRemainder();
+      $('paymentChange').showModal();
+    } catch {
+      showPaymentError('无法读取货款记录，请刷新后重试。');
+    }
+  };
+  paymentChangeForm.elements.first.oninput = updatePaymentRemainder;
+  $('paymentChangeCancel').onclick = () => $('paymentChange').close();
+  paymentChangeForm.onsubmit = event => {
+    event.preventDefault();
+    const {raw,record,split} = paymentSelection;
+    const fields = paymentChangeForm.elements;
+    const first = readCents(fields.first);
+    if (split && (!validPaymentAmount(first) || first >= record.amount)) {
+      $('paymentChangeError').textContent = '第一笔金额必须大于零且小于原金额。';
+      return;
+    }
+    try {
+      if (localStorage.getItem(paymentKey) !== raw) {
+        $('paymentChangeError').textContent = '记录已在另一窗口更新，请取消后重新打开。';
+        return;
+      }
+      const records = readPayments(raw);
+      const index = records.findIndex(entry => entry.id === record.id);
+      if (split) records.splice(index,1,{...record,amount:record.amount-first},{...record,id:crypto.randomUUID(),amount:first});
+      else records[index] = {...record,status:fields.status.value,note:fields.note.value.trim()};
+      localStorage.setItem(paymentKey,JSON.stringify(records));
+    } catch {
+      $('paymentChangeError').textContent = '无法保存货款，请检查浏览器存储后重试。';
+      return;
+    }
+    $('paymentChange').close();
     renderPayments();
   };
   window.addEventListener('storage',event => {
