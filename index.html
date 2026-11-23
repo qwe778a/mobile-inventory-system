@@ -224,7 +224,8 @@
 const $ = id => document.getElementById(id);
 const key = 'phone-inventory-v1';
 const names = {stock:'库存', inbound:'入库', sold:'出库', profit:'利润', service:'售后'};
-const states = {available:'在库', sold:'已售出', open:'售后处理中', closed:'售后已完成', returned:'退货已回库'};
+const states = {available:'在库', sold:'已售出', open:'售后处理中', closed:'售后已完成', returned:'售后退回'};
+const defaultPickupFreight = 449;
 const exchangeProgressOptions = {
   sentWaiting:'新机已寄出，旧机未取回',
   sentReceived:'新机已寄出，旧机已取回',
@@ -238,9 +239,25 @@ const serviceReasonLabel = (kind,quality) => quality === 'quality'
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
 const money = cents => '¥' + (cents/100).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
-const status = item => item.service?.state === 'returned' ? 'returned' : item.service?.state ?? (item.sale ? 'sold' : 'available');
+const serviceReceivedDate = service => service.receivedOn ?? service.date;
+function receivedFromService(service) {
+  if (!service) return false;
+  const progress = service.progress ?? service.exchangeStatus;
+  return service.state === 'returned' ||
+    (service.reason === '换货' && ['sentReceived','waitingNew'].includes(progress)) ||
+    (service.reason === '退货' && progress === 'returnReceived');
+}
+function markServiceReceived(service) {
+  if (service.reason === '退货') return {...service,progress:'returnReceived'};
+  if (service.reason === '换货') {
+    const progress = service.progress ?? service.exchangeStatus;
+    return {...service,progress:['sentWaiting','sentReceived'].includes(progress) ? 'sentReceived' : 'waitingNew'};
+  }
+  return service;
+}
+const status = item => receivedFromService(item.service) ? 'returned' : item.service?.state ?? (item.sale ? 'sold' : 'available');
 const inStock = item => !item.sale || status(item) === 'returned';
-const activeSale = item => item.sale && status(item) !== 'returned';
+const activeSale = item => item.sale && status(item) !== 'returned' && item.service?.reason !== '退货';
 const needsTracking = item => activeSale(item) && !String(item.sale.tracking ?? '').trim();
 const imeiPattern = /^\d{15}$/;
 const itemNumberPattern = /^\d{20}$/;
@@ -284,10 +301,14 @@ function validate(data) {
         (item.history !== undefined && (!Array.isArray(item.history) || item.history.some(entry =>
           !entry || !date(entry.sale?.date) || !amount(entry.sale.price) ||
           !date(entry.service?.date) || entry.service.date < entry.sale.date ||
-          entry.service.state !== 'returned' || typeof entry.service.reason !== 'string'))) ||
+          entry.service.state !== 'returned' || typeof entry.service.reason !== 'string' ||
+          (entry.service.receivedOn !== undefined && (!date(entry.service.receivedOn) || entry.service.receivedOn < entry.service.date)) ||
+          (entry.service.pickupFreight !== undefined && !amount(entry.service.pickupFreight))))) ||
         (item.service && (!item.sale || !date(item.service.date) || item.service.date < item.sale.date ||
           !['open','closed','returned'].includes(item.service.state) ||
-          typeof item.service.reason !== 'string' || !item.service.reason.trim()))) {
+          typeof item.service.reason !== 'string' || !item.service.reason.trim() ||
+          (item.service.receivedOn !== undefined && (!date(item.service.receivedOn) || item.service.receivedOn < item.service.date)) ||
+          (item.service.pickupFreight !== undefined && !amount(item.service.pickupFreight))))) {
       throw Error('记录无效或 IMEI / 物品编号重复，请检查日期和设备信息');
     }
     ids.add(item.id); imeis.add(item.imei); serials.add(item.serial.toUpperCase());
@@ -326,12 +347,23 @@ function tab(next) {
 function dateFor(item) {
   if (page === 'service') return item.service.date;
   if (page === 'sold' || page === 'profit') return item.sale.date;
-  return status(item) === 'returned' && page === 'stock' ? item.service.date : item.inbound;
+  return status(item) === 'returned' ? serviceReceivedDate(item.service) : item.inbound;
+}
+
+function archivedSales() {
+  return items.flatMap(item => (item.history ?? []).map(({sale,service},index) =>
+    ({id:item.id,model:item.model,capacity:item.capacity,imei:item.imei,serial:item.serial,
+      sale,service,archived:true,historyIndex:index})));
+}
+
+function originalExchangeRecord(sale) {
+  if (!sale.exchangeFor) return undefined;
+  return items.find(row => row.sale?.exchangeGroup === sale.exchangeFor) ??
+    archivedSales().find(row => row.sale.exchangeGroup === sale.exchangeFor);
 }
 
 function originalExchangeSale(sale) {
-  if (!sale.exchangeFor) return undefined;
-  return items.find(row => row.sale?.exchangeGroup === sale.exchangeFor)?.sale ?? sale.originalSale;
+  return originalExchangeRecord(sale)?.sale ?? sale.originalSale;
 }
 
 function salePrice(sale) {
@@ -341,19 +373,35 @@ function salePrice(sale) {
   return sale.price + (Number.isSafeInteger(originalPrice) ? originalPrice : 0);
 }
 
-function saleCharges(item) {
-  const original = originalExchangeSale(item.sale);
-  const address = String(item.sale.address || original?.address || '').trim();
+function regionalFreight(address) {
+  address = String(address ?? '').trim();
   const region = address.match(/北京|天津|河北|山西|内蒙古|辽宁|吉林|黑龙江|上海|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|重庆|四川|贵州|云南|西藏|陕西|甘肃|青海|宁夏|新疆|台湾|香港|澳门/)?.[0];
   const rate = ['北京','上海'].includes(region) ? 400 :
     ['海南','宁夏','青海'].includes(region) ? 700 :
     ['西藏','新疆'].includes(region) ? 1500 : 300;
-  const trips = item.sale.exchangeFor || item.service?.reason === '换货' ? 3 : 1;
-  const channel = original?.channel ?? item.sale.channel;
+  return {rate,region};
+}
+
+function pickupFreight(service) {
+  return service?.pickupFreight ?? defaultPickupFreight;
+}
+
+function saleCharges(item) {
+  const original = originalExchangeRecord(item.sale);
+  const originalSale = original?.sale ?? item.sale.originalSale;
+  const {rate:freight,region} = regionalFreight(originalSale?.address || item.sale.address);
+  const exchange = Boolean(item.sale.exchangeFor) || item.service?.reason === '换货';
+  const refund = item.service?.reason === '退货' || (status(item) === 'returned' && item.service.reason !== '换货');
+  const resend = exchange ? regionalFreight(item.sale.address || originalSale?.address) : {rate:0};
+  const exchangePickup = exchange ? pickupFreight(item.sale.exchangeFor ? original?.service : item.service) : 0;
+  const returnPickup = refund ? pickupFreight(item.service) : 0;
+  const serviceFreight = resend.rate + exchangePickup + returnPickup;
+  const channel = originalSale?.channel ?? item.sale.channel;
   const price = salePrice(item.sale);
-  const fee = String(channel ?? '').trim() === '代发' ? 0 : Math.round(price * 16 / 1000);
-  const freight = rate * trips;
-  return {fee,freight,trips,region,net:price-item.cost-fee-freight};
+  const effective = activeSale(item);
+  const fee = !effective || String(channel ?? '').trim() === '代发' ? 0 : Math.round(price * 16 / 1000);
+  const net = (effective ? price-item.cost-fee : 0) - freight - serviceFreight;
+  return {fee,freight,region,resend,exchangePickup,returnPickup,serviceFreight,net,exchange,refund,effective};
 }
 
 function totals(rows) {
@@ -362,9 +410,10 @@ function totals(rows) {
   const cost = sales.reduce((sum,item) => sum + item.cost,0);
   const metrics = [['有效出库',sales.length+' 台'],['销售额',money(revenue)],['销售成本',money(cost)],['毛利润',money(revenue-cost)]];
   if (page === 'profit') {
-    const charges = sales.map(saleCharges);
+    const charges = rows.map(saleCharges);
     const sum = name => charges.reduce((total,item) => total+item[name],0);
-    metrics.push(['平台手续费',money(sum('fee'))],['运费',money(sum('freight'))],['实际利润',money(sum('net'))]);
+    metrics.push(['平台手续费',money(sum('fee'))],['发货运费',money(sum('freight'))],
+      ['售后运费',money(sum('serviceFreight'))],['实际利润',money(sum('net'))]);
   }
   return metrics;
 }
@@ -374,27 +423,33 @@ function action(label, command, item, style = '') {
 }
 
 function card(item, showProfit = page === 'profit') {
-  const historyInfo = item.history?.length ? `<details><summary>历史退货（${item.history.length} 笔）</summary>
-    ${item.history.map(entry => `<p>出库 ${escape(entry.sale.date)} · ${money(salePrice(entry.sale))} ${entry.sale.tracking ? '· 单号 '+escape(entry.sale.tracking) : ''} · 退货 ${escape(entry.service.date)} · ${escape(entry.service.reason)}</p>`).join('')}</details>` : '';
+  const historyInfo = item.history?.length ? `<details><summary>历史售后回库（${item.history.length} 笔）</summary>
+    ${item.history.map(entry => `<p>出库 ${escape(entry.sale.date)} · ${money(salePrice(entry.sale))} ${entry.sale.tracking ? '· 单号 '+escape(entry.sale.tracking) : ''} · 回库 ${escape(serviceReceivedDate(entry.service))} · ${escape(entry.service.reason)}</p>`).join('')}</details>` : '';
   const tracking = item.sale?.tracking ? `<p class="muted">单号 ${escape(item.sale.tracking)}</p>` : '';
   const saleInfo = item.sale && page !== 'stock' && page !== 'inbound'
     ? `<p>售价 ${money(salePrice(item.sale))} · ${escape(item.sale.channel || '未填写销售渠道')}</p>` : '';
   const saleAddress = page === 'sold' && item.sale?.address
     ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(item.sale.address)}</p></details>` : '';
   const charges = showProfit ? saleCharges(item) : null;
-  const profitInfo = charges ? `<p><strong>实际利润 ${money(charges.net)}</strong></p>
-    <p class="muted">手续费 ${money(charges.fee)} · 运费 ${money(charges.freight)}（${charges.trips} 程${charges.region ? ' · '+charges.region : ' · 未识别地区，按 ¥3/程'}）</p>` : '';
+  const freightRegion = region => region || '未识别地区，按 ¥3';
+  const profitInfo = charges ? `<p><strong>${charges.effective ? '实际利润 '+money(charges.net) : '售后物流支出 '+money(-charges.net)}</strong></p>
+    <p class="muted">${charges.effective ? '手续费 '+money(charges.fee)+' · ' : ''}发货运费 ${money(charges.freight)}（${freightRegion(charges.region)}）</p>
+    ${charges.exchange || charges.refund ? `<p class="muted">售后运费 ${money(charges.serviceFreight)}</p>` : ''}
+    ${charges.exchange ? `<p class="muted">换货寄回运费 ${money(charges.resend.rate)}（${freightRegion(charges.resend.region)}） · 旧机取回运费 ${money(charges.exchangePickup)}</p>` : ''}
+    ${charges.refund ? `<p class="muted">退货取回运费 ${money(charges.returnPickup)}</p>` : ''}` : '';
   const service = item.service;
   const progress = service?.progress ?? service?.exchangeStatus;
   const serviceInfo = service && page === 'service' ? `
     <p>${escape(service.quality ? serviceReasonLabel(service.reason,service.quality) : service.reason)}</p>
     ${service.returnTracking ? `<p class="muted">寄回单号 ${escape(service.returnTracking)}</p>` : ''}
     ${service.exchangeTracking ? `<p class="muted">换货单号 ${escape(service.exchangeTracking)}</p>` : ''}
+    ${['换货','退货'].includes(service.reason) ? `<p class="muted">${service.reason === '换货' ? '旧机' : '退货'}取回运费 ${money(pickupFreight(service))}</p>` : ''}
     ${Object.hasOwn(serviceProgressOptions,progress) ? `<p class="muted">处理进度 ${serviceProgressOptions[progress]}</p>` : ''}
     ` : '';
-  const completedService = page === 'service' && status(item) !== 'open';
+  const returned = status(item) === 'returned';
+  const completedService = page === 'service' && status(item) === 'closed';
   const statusLabel = completedService ? '已完成' : states[status(item)];
-  const statusStyle = completedService ? ' service-complete' : '';
+  const statusStyle = returned || completedService ? ' service-complete' : '';
   let buttons = '';
   if (page === 'stock' || page === 'inbound') {
     buttons = action('编辑','device',item);
@@ -406,13 +461,13 @@ function card(item, showProfit = page === 'profit') {
     if (!item.service) buttons += action('删除出库','deleteSale',item,'danger');
   }
   if (page === 'service') buttons = action('编辑 / 标记进度','service',item) +
-    (status(item) === 'open' ? action('标记处理完成','completeService',item,'primary') : '') +
+    (service.state === 'open' ? action(returned ? '标记处理完成' : '确认收回并完成','completeService',item,'primary') : '') +
     action('删除售后','deleteService',item,'danger');
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><div class="record-tags">${item.problem === true && (page === 'stock' || page === 'inbound') ? '<span class="tag problem-tag">问题机</span>' : ''}<span class="tag${statusStyle}" title="${states[status(item)]}">${statusLabel}</span></div></div>
     <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(item.serial)}</p>
     <p>成本 ${money(item.cost)} ${escape(item.channel || '')}</p>
     ${saleInfo}${tracking}${saleAddress}${profitInfo}${serviceInfo}${historyInfo}${page !== 'service' && item.note ? `<p class="muted">${escape(item.note)}</p>` : ''}
-    <div class="actions">${buttons}</div></article>`;
+    ${item.archived ? '' : `<div class="actions">${buttons}</div>`}</article>`;
 }
 
 function salePhones(sale) {
@@ -426,29 +481,26 @@ function matchesOrderIdentifier(value,query) {
   return number === query || (query.length === 4 && number.endsWith(query));
 }
 
-function matchesInventorySearch(item,query) {
+function matchesInventorySearch(item,query,includeHistory = true) {
   const values = [item.serial,item.imei];
-  for (const {sale,service} of [item,...(item.history ?? [])]) {
+  for (const {sale,service} of includeHistory ? [item,...(item.history ?? [])] : [item]) {
     values.push(sale?.tracking,service?.returnTracking,service?.exchangeTracking,...salePhones(sale),
-      sale?.originalSale?.tracking,...salePhones({phone:sale?.originalSale?.phone}));
+      sale?.originalSale?.tracking,sale?.originalSale?.serial,sale?.originalSale?.imei,...salePhones({phone:sale?.originalSale?.phone}));
   }
   return values.some(value => matchesOrderIdentifier(value,query));
 }
 
 function outboundGroups(rows) {
-  const originals = new Map(items.filter(item => item.sale?.exchangeGroup).map(item => [item.sale.exchangeGroup,item]));
-  const returnedGroups = new Set(items.flatMap(item => (item.history ?? []).map(entry => entry.sale.exchangeFor).filter(Boolean)));
-  const pairs = new Map(items.filter(item => item.sale?.exchangeFor).map(replacement => {
+  const all = [...archivedSales(),...items];
+  const originals = new Map(all.filter(item => item.sale?.exchangeGroup).map(item => [item.sale.exchangeGroup,item]));
+  const pairs = new Map(all.filter(item => item.sale?.exchangeFor).map(replacement => {
     const {exchangeFor,originalSale} = replacement.sale;
     return [exchangeFor,{original:originals.get(exchangeFor),snapshot:originalSale,replacement}];
   }));
   const shown = new Set();
   return rows.flatMap(item => {
     const pair = pairs.get(item.sale.exchangeFor || item.sale.exchangeGroup);
-    if (!pair) {
-      const replaced = returnedGroups.has(item.sale.exchangeGroup);
-      return [{item,pendingCount:Number(Boolean(needsTracking(item))),rows:replaced ? [] : [item]}];
-    }
+    if (!pair) return [{item,pendingCount:Number(Boolean(needsTracking(item))),rows:[item]}];
     if (shown.has(pair)) return [];
     shown.add(pair);
     const pendingCount = [pair.original,pair.replacement].filter(member => member && needsTracking(member)).length;
@@ -482,14 +534,14 @@ function render() {
   }).join('');
   const query = $('query').value.trim().toLowerCase();
   const filter = $('filter').value;
-  const rows = items.filter(item => {
-    if (!({stock:inStock(item),inbound:item.inbound,sold:item.sale,profit:item.sale,service:item.service})[page]) return false;
-    return (!filter || status(item) === filter) && (!query || matchesInventorySearch(item,query));
+  const recordsForPage = page === 'profit' ? [...items,...archivedSales()] : items;
+  const rows = recordsForPage.filter(item => {
+    if (!({stock:inStock(item),inbound:item.inbound || status(item) === 'returned',sold:item.sale,profit:item.sale,service:item.service})[page]) return false;
+    return (!filter || status(item) === filter) && (!query || matchesInventorySearch(item,query,page !== 'profit'));
   });
   const ordered = rows.sort((a,b) => dateFor(b).localeCompare(dateFor(a)));
   const outbound = page === 'sold' || page === 'profit';
-  let entries = outbound ? outboundGroups(ordered) : ordered.map(item => ({item,rows:[item]}));
-  if (page === 'profit') entries = entries.filter(entry => entry.rows.some(activeSale));
+  const entries = outbound ? outboundGroups(ordered) : ordered.map(item => ({item,rows:[item]}));
   if (outbound) entries.sort((a,b) => dateFor(b.item).localeCompare(dateFor(a.item)));
   const cost = list => money(list.reduce((sum,item) => sum+item.cost,0));
   const stats = outbound ? totals(entries.flatMap(entry => entry.rows)) : page === 'service'
@@ -584,18 +636,19 @@ function syncServiceProgress() {
   delete progress.dataset.saved;
   $('serviceExchangeTracking').hidden = kind !== '换货';
   fields.namedItem('exchangeTracking').disabled = kind !== '换货';
-  const state = fields.namedItem('state');
-  const returned = state.querySelector('option[value="returned"]');
-  returned.disabled = kind !== '退货';
-  returned.hidden = returned.disabled;
-  if (returned.disabled && state.value === 'returned') state.value = 'open';
+  $('pickupFreightLabel').textContent = kind === '退货' ? '退货取回运费（元）' : '旧机取回运费（元）';
   fields.namedItem('note').required = quality.value === 'quality';
 }
 
 function canLinkOriginal(item,existingGroup) {
-  return item.id !== selected?.id && activeSale(item) && !item.sale.exchangeFor &&
+  return item.id !== selected?.id && item.sale &&
+    (activeSale(item) || item.service?.reason === '换货') && !item.sale.exchangeFor &&
     (!item.sale.exchangeGroup || item.sale.exchangeGroup === existingGroup);
 }
+
+const exchangeChoiceKey = item => item.archived ? item.id+':'+item.historyIndex : item.id;
+const exchangeChoices = () => [...items,...archivedSales()];
+const findExchangeChoice = key => exchangeChoices().find(row => exchangeChoiceKey(row) === key);
 
 function renderExchangeOriginals() {
   const form = $('form');
@@ -603,12 +656,12 @@ function renderExchangeOriginals() {
   const phoneQuery = query.replace(/[^0-9]/g,'').replace(/^86(?=1[3-9][0-9]{9}$)/,'');
   const chosen = form.elements.namedItem('exchangeOriginalId').value;
   const group = mode === 'saleEdit' ? selected.sale.exchangeFor : undefined;
-  const candidates = items.filter(item => canLinkOriginal(item,group) && (
-    item.id === chosen || Boolean(query) && (matchesOrderIdentifier(item.sale.tracking,query) ||
+  const candidates = exchangeChoices().filter(item => canLinkOriginal(item,group) && (
+    exchangeChoiceKey(item) === chosen || Boolean(query) && (matchesOrderIdentifier(item.sale.tracking,query) ||
       salePhones(item.sale).some(phone => matchesOrderIdentifier(phone,phoneQuery)))
   )).sort((a,b) => b.sale.date.localeCompare(a.sale.date));
   $('exchangeOriginalResults').innerHTML = candidates.map(item => `<label class="exchange-option">
-    <input type="radio" name="exchangeChoice" value="${escape(item.id)}"${item.id === chosen ? ' checked' : ''}>
+    <input type="radio" name="exchangeChoice" value="${escape(exchangeChoiceKey(item))}"${exchangeChoiceKey(item) === chosen ? ' checked' : ''}>
     <span><strong>${escape(item.model)} ${escape(item.capacity)}</strong> · ${escape(item.sale.date)}<br>
     原单售价 ${money(item.sale.price)} · 物品编号 ${escape(item.serial)} · 单号 ${escape(item.sale.tracking || '—')}
     ${salePhones(item.sale).map(phone => ' · 手机尾号 '+phone.slice(-4)).join('')}</span></label>`
@@ -628,13 +681,32 @@ function syncExchangeSale() {
     price.dataset.normalPrice = price.dataset.exchange === 'false' ? price.value : '';
     const existing = mode === 'saleEdit' && selected.sale.exchangeFor ? selected.sale : null;
     const originalId = fields.namedItem('exchangeOriginalId').value;
-    const original = items.find(row => row.id === originalId);
+    const original = findExchangeChoice(originalId);
     price.value = existing ? salePrice(existing)/100 : original ? original.sale.price/100 : '';
   } else if (!exchange && price.dataset.exchange === 'true') {
     price.value = price.dataset.normalPrice;
   }
   price.dataset.exchange = String(exchange);
   if (exchange) renderExchangeOriginals();
+}
+
+function updateExchangeGroup(records,original,group,previousGroup) {
+  const revise = (sale,match) => {
+    if (match) return {...sale,exchangeGroup:group};
+    if (!previousGroup || previousGroup === group || sale?.exchangeGroup !== previousGroup) return sale;
+    const unlinked = {...sale};
+    delete unlinked.exchangeGroup;
+    return unlinked;
+  };
+  return records.map(row => {
+    const sale = revise(row.sale,row.id === original?.id && !original.archived);
+    const history = row.history?.map((entry,index) => {
+      const archived = revise(entry.sale,row.id === original?.id && index === original.historyIndex);
+      return archived === entry.sale ? entry : {...entry,sale:archived};
+    });
+    return sale === row.sale && !history?.some((entry,index) => entry !== row.history[index])
+      ? row : {...row,sale,...(history ? {history} : {})};
+  });
 }
 
 function setExchangeLink(item,original,previousGroup) {
@@ -646,15 +718,7 @@ function setExchangeLink(item,original,previousGroup) {
   item.sale.exchangeFor = group;
   item.sale.originalSale = {model:original.model,capacity:original.capacity,serial:original.serial,
     imei:original.imei,date:original.sale.date,price:original.sale.price,channel:original.sale.channel,tracking:original.sale.tracking,phone:salePhones(original.sale)[0],address:original.sale.address};
-  return items.map(row => {
-    if (row.id === original.id) return {...row,sale:{...row.sale,exchangeGroup:group}};
-    if (previousGroup && previousGroup !== group && row.sale?.exchangeGroup === previousGroup) {
-      const sale = {...row.sale};
-      delete sale.exchangeGroup;
-      return {...row,sale};
-    }
-    return row;
-  });
+  return updateExchangeGroup(items,original,group,previousGroup);
 }
 
 function openForm(next,item) {
@@ -680,6 +744,7 @@ function openForm(next,item) {
       note(item?.note ?? '');
   }
   if (selling) {
+    const original = sale?.exchangeFor ? originalExchangeRecord(sale) : null;
     html += field('date','出库日期',sale?.date || today(),'required','date') +
       `<label><span id="salePriceLabel">售价（元）</span><input name="price" type="number" inputmode="decimal" min="0" max="999999999.99" step="0.01" required value="${sale ? sale.price/100 : ''}"></label>` +
       customChoice('saleChannel','销售渠道',['','闲鱼','代发','换货'],sale?.channel,'') +
@@ -688,7 +753,7 @@ function openForm(next,item) {
       `<label class="wide">收货地址<textarea name="saleAddress" rows="3" maxlength="500" placeholder="请包含省份或直辖市，用于计算运费">${escape(sale?.address)}</textarea></label>` +
       `<fieldset class="wide exchange-pick" id="exchangeSalePick" hidden disabled><legend>关联原出库单</legend>
       <label>手机号或快递单号（支持后四位）<input id="exchangeOriginalSearch" type="search" autocomplete="off"></label>
-      <input type="hidden" name="exchangeOriginalId" value="${escape(sale?.exchangeFor ? items.find(row => row.sale?.exchangeGroup === sale.exchangeFor && activeSale(row))?.id : '')}">
+      <input type="hidden" name="exchangeOriginalId" value="${escape(original && canLinkOriginal(original,sale.exchangeFor) ? exchangeChoiceKey(original) : '')}">
       <div id="exchangeOriginalResults"></div></fieldset>`;
   }
   if (mode === 'service') {
@@ -705,6 +770,8 @@ function openForm(next,item) {
       <label class="wide">处理进度<select name="progress" data-saved="${escape(service?.progress ?? service?.exchangeStatus)}"></select></label>` +
       field('returnTracking','寄回单号',service?.returnTracking,'maxlength="100" autocapitalize="off"') +
       `<div id="serviceExchangeTracking">${field('exchangeTracking','换货单号',service?.exchangeTracking,'maxlength="100" autocapitalize="off"')}</div>` +
+      `<label class="wide"><span id="pickupFreightLabel">旧机取回运费（元）</span>
+        <input name="pickupFreight" type="number" inputmode="decimal" min="0" max="999999999.99" step="0.01" required value="${pickupFreight(service)/100}"></label>` +
       note([service?.reason && !['换货','退货'].includes(service.reason) ? '原售后原因：'+service.reason : '',service?.note].filter(Boolean).join('\n'));
   }
   $('form').noValidate = deviceFields;
@@ -745,10 +812,10 @@ $('form').addEventListener('submit',event => {
       model:values.model === '其他' ? values.modelCustom || '其他' : values.model, capacity:values.capacity, imei:values.imei, serial:values.serial, problem:values.problem === 'on',
       cost:Math.round(Number(values.cost)*100), channel:values.channel === '其他' ? values.channelCustom || '其他' : values.channel, note:values.note, inbound:mode === 'direct' ? null : values.inbound || item.inbound
     });
-    if (mode === 'sell' && item.service?.state === 'returned') {
-      if (values.date < item.service.date) throw Error('再次出库日期应晚于或等于回库日期');
-      item.history = [...(item.history || []), {sale:item.sale, service:item.service}];
-      item.inbound ||= item.service.date;
+    if (mode === 'sell' && status(item) === 'returned') {
+      if (values.date < serviceReceivedDate(item.service)) throw Error('再次出库日期应晚于或等于回库日期');
+      item.history = [...(item.history || []), {sale:item.sale,service:{...item.service,state:'returned'}}];
+      item.inbound ||= serviceReceivedDate(item.service);
       delete item.service;
     }
     let records = items;
@@ -761,7 +828,7 @@ $('form').addEventListener('submit',event => {
       };
       if (values.saleChannel === '换货') {
         if (previous?.exchangeGroup) throw Error('这笔原单已关联换货，请保留原销售渠道。');
-        const original = items.find(row => row.id === values.exchangeOriginalId);
+        const original = findExchangeChoice(values.exchangeOriginalId);
         if (values.exchangeOriginalId && (!original || !canLinkOriginal(original,previous?.exchangeFor))) {
           throw Error('所选原单已更新，请重新选择。');
         }
@@ -772,24 +839,25 @@ $('form').addEventListener('submit',event => {
         delete item.sale.exchangeFor;
         delete item.sale.originalSale;
         delete item.sale.exchangePriceIsTotal;
-        records = items.map(row => {
-          if (row.sale?.exchangeGroup !== previous.exchangeFor) return row;
-          const sale = {...row.sale};
-          delete sale.exchangeGroup;
-          return {...row,sale};
-        });
+        records = updateExchangeGroup(items,null,null,previous.exchangeFor);
       }
     }
     if (mode === 'service') {
       const {date,reason,quality,state,progress,note,returnTracking,exchangeTracking} = values;
       const progressOptions = reason === '换货' ? exchangeProgressOptions : returnProgressOptions;
       if (!['换货','退货'].includes(reason) || !['quality','clear'].includes(quality) ||
-          !['open','closed','returned'].includes(state) || (state === 'returned' && reason !== '退货') ||
+          !['open','closed','returned'].includes(state) ||
           (progress && !Object.hasOwn(progressOptions,progress))) {
         throw Error('请选择售后类型、原因和处理状态。');
       }
       if (quality === 'quality' && !note) throw Error('质量问题请填写备注。');
-      item.service = {date,reason,quality,state,progress,note,returnTracking};
+      item.service = {date,reason,quality,state,progress,note,returnTracking,
+        pickupFreight:Math.round(Number(values.pickupFreight)*100)};
+      if (state === 'closed' || state === 'returned') item.service = markServiceReceived(item.service);
+      if (receivedFromService(item.service)) {
+        const confirmationDate = receivedFromService(selected.service) ? serviceReceivedDate(selected.service) : today();
+        item.service.receivedOn = confirmationDate < date ? date : confirmationDate;
+      }
       if (reason === '换货') item.service.exchangeTracking = exchangeTracking;
     }
     const actionName = mode === 'service'
@@ -846,7 +914,12 @@ $('records').addEventListener('click',event => {
   if (command === 'completeService') {
     if (item?.service?.state !== 'open') return;
     try {
-      save(items.map(row => row.id === item.id ? {...row,service:{...row.service,state:'closed'}} : row),
+      const service = markServiceReceived({...item.service,state:'closed'});
+      if (receivedFromService(service)) {
+        const confirmationDate = receivedFromService(item.service) ? serviceReceivedDate(item.service) : today();
+        service.receivedOn = confirmationDate < service.date ? service.date : confirmationDate;
+      }
+      save(items.map(row => row.id === item.id ? {...row,service} : row),
         '标记售后已完成',describeItem(item));
       render();
     } catch (error) { alert(error.message); }
@@ -860,13 +933,10 @@ $('records').addEventListener('click',event => {
   }[command];
   if (!confirm(warning)) return;
   try {
-    const next = items.flatMap(row => {
-      if (row.id !== item.id) {
-        if (command !== 'deleteSale' || !item.sale?.exchangeFor || row.sale?.exchangeGroup !== item.sale.exchangeFor) return [row];
-        const sale = {...row.sale};
-        delete sale.exchangeGroup;
-        return [{...row,sale}];
-      }
+    const records = command === 'deleteSale' && item.sale?.exchangeFor
+      ? updateExchangeGroup(items,null,null,item.sale.exchangeFor) : items;
+    const next = records.flatMap(row => {
+      if (row.id !== item.id) return [row];
       if (command === 'deleteDevice' || (command === 'deleteSale' && !row.inbound)) return [];
       const updated = {...row};
       delete updated[command === 'deleteSale' ? 'sale' : 'service'];
@@ -1045,12 +1115,13 @@ $('fields').addEventListener('change',event => {
   if (event.target.matches('select[name="saleChannel"]')) syncExchangeSale();
   if (event.target.matches('input[name="exchangeChoice"]')) {
     const fields = $('form').elements;
-    const original = items.find(row => row.id === event.target.value);
+    const original = findExchangeChoice(event.target.value);
     if (!original) return;
     const originalId = fields.namedItem('exchangeOriginalId');
-    const previous = items.find(row => row.id === originalId.value)?.sale;
-    if (originalId.value !== original.id) fields.namedItem('price').value = original.sale.price/100;
-    originalId.value = original.id;
+    const previous = findExchangeChoice(originalId.value)?.sale;
+    const choice = exchangeChoiceKey(original);
+    if (originalId.value !== choice) fields.namedItem('price').value = original.sale.price/100;
+    originalId.value = choice;
     for (const [name,oldValue,newValue] of [
       ['salePhone',previous?.phone || salePhones(previous)[0],original.sale.phone || salePhones(original.sale)[0]],
       ['saleAddress',previous?.address,original.sale.address]
