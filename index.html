@@ -428,8 +428,9 @@ function card(item, showProfit = page === 'profit') {
   const tracking = item.sale?.tracking ? `<p class="muted">单号 ${escape(item.sale.tracking)}</p>` : '';
   const saleInfo = item.sale && page !== 'stock' && page !== 'inbound'
     ? `<p>售价 ${money(salePrice(item.sale))} · ${escape(item.sale.channel || '未填写销售渠道')}</p>` : '';
-  const saleAddress = page === 'sold' && item.sale?.address
-    ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(item.sale.address)}</p></details>` : '';
+  const address = page === 'sold' ? deliveryAddress(item.sale) : '';
+  const saleAddress = address
+    ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(address)}</p></details>` : '';
   const charges = showProfit ? saleCharges(item) : null;
   const freightRegion = region => region || '未识别地区，按 ¥3';
   const profitInfo = charges ? `<p><strong>${charges.effective ? '实际利润 '+money(charges.net) : '售后物流支出 '+money(-charges.net)}</strong></p>
@@ -470,10 +471,19 @@ function card(item, showProfit = page === 'profit') {
     ${item.archived ? '' : `<div class="actions">${buttons}</div>`}</article>`;
 }
 
+const normalizeSalePhone = value =>
+  String(value ?? '').replace(/[^0-9*]/g,'').replace(/^86(?=1[3-9][0-9*]{9}$)/,'');
+
 function salePhones(sale) {
   const addressPhones = String(sale?.address ?? '').match(/(?<![0-9])(?:\+?86[ -]?)?1[3-9](?:[ -]?[0-9*]){9}(?![0-9])/g) ?? [];
-  return [sale?.phone,...addressPhones].map(value =>
-    String(value ?? '').replace(/[^0-9*]/g,'').replace(/^86(?=1[3-9][0-9*]{9}$)/,'')).filter(Boolean);
+  return [...new Set([sale?.phone,...addressPhones].map(normalizeSalePhone).filter(Boolean))];
+}
+
+function deliveryAddress(sale) {
+  const address = String(sale?.address ?? '').trim();
+  const phone = String(sale?.phone ?? '').trim();
+  if (!phone || address.includes(phone) || salePhones({address}).includes(normalizeSalePhone(phone))) return address;
+  return [address,phone].filter(Boolean).join('\n');
 }
 
 function matchesOrderIdentifier(value,query) {
@@ -485,7 +495,7 @@ function matchesInventorySearch(item,query,includeHistory = true) {
   const values = [item.serial,item.imei];
   for (const {sale,service} of includeHistory ? [item,...(item.history ?? [])] : [item]) {
     values.push(sale?.tracking,service?.returnTracking,service?.exchangeTracking,...salePhones(sale),
-      sale?.originalSale?.tracking,sale?.originalSale?.serial,sale?.originalSale?.imei,...salePhones({phone:sale?.originalSale?.phone}));
+      sale?.originalSale?.tracking,sale?.originalSale?.serial,sale?.originalSale?.imei,...salePhones(sale?.originalSale));
   }
   return values.some(value => matchesOrderIdentifier(value,query));
 }
@@ -717,7 +727,7 @@ function setExchangeLink(item,original,previousGroup) {
   const group = original.sale.exchangeGroup || crypto.randomUUID();
   item.sale.exchangeFor = group;
   item.sale.originalSale = {model:original.model,capacity:original.capacity,serial:original.serial,
-    imei:original.imei,date:original.sale.date,price:original.sale.price,channel:original.sale.channel,tracking:original.sale.tracking,phone:salePhones(original.sale)[0],address:original.sale.address};
+    imei:original.imei,date:original.sale.date,price:original.sale.price,channel:original.sale.channel,tracking:original.sale.tracking,address:deliveryAddress(original.sale)};
   return updateExchangeGroup(items,original,group,previousGroup);
 }
 
@@ -749,8 +759,7 @@ function openForm(next,item) {
       `<label><span id="salePriceLabel">售价（元）</span><input name="price" type="number" inputmode="decimal" min="0" max="999999999.99" step="0.01" required value="${sale ? sale.price/100 : ''}"></label>` +
       customChoice('saleChannel','销售渠道',['','闲鱼','代发','换货'],sale?.channel,'') +
       field('tracking','单号',sale?.tracking) +
-      field('salePhone','收货手机号',sale?.phone,'inputmode="tel" maxlength="30"','tel') +
-      `<label class="wide">收货地址<textarea name="saleAddress" rows="3" maxlength="500" placeholder="请包含省份或直辖市，用于计算运费">${escape(sale?.address)}</textarea></label>` +
+      `<label class="wide">收货地址<textarea name="saleAddress" rows="3" placeholder="可粘贴收件人、手机号和详细地址，请包含省份或直辖市">${escape(deliveryAddress(sale))}</textarea></label>` +
       `<fieldset class="wide exchange-pick" id="exchangeSalePick" hidden disabled><legend>关联原出库单</legend>
       <label>手机号或快递单号（支持后四位）<input id="exchangeOriginalSearch" type="search" autocomplete="off"></label>
       <input type="hidden" name="exchangeOriginalId" value="${escape(original && canLinkOriginal(original,sale.exchangeFor) ? exchangeChoiceKey(original) : '')}">
@@ -824,8 +833,9 @@ $('form').addEventListener('submit',event => {
       const channel = values.saleChannel === '其他' ? values.saleChannelCustom || '其他' : values.saleChannel;
       item.sale = {
         ...previous,date:values.date,price:Math.round(Number(values.price)*100),channel,
-        tracking:values.tracking,address:values.saleAddress,phone:values.salePhone
+        tracking:values.tracking,address:values.saleAddress
       };
+      delete item.sale.phone;
       if (values.saleChannel === '换货') {
         if (previous?.exchangeGroup) throw Error('这笔原单已关联换货，请保留原销售渠道。');
         const original = findExchangeChoice(values.exchangeOriginalId);
@@ -1122,13 +1132,8 @@ $('fields').addEventListener('change',event => {
     const choice = exchangeChoiceKey(original);
     if (originalId.value !== choice) fields.namedItem('price').value = original.sale.price/100;
     originalId.value = choice;
-    for (const [name,oldValue,newValue] of [
-      ['salePhone',previous?.phone || salePhones(previous)[0],original.sale.phone || salePhones(original.sale)[0]],
-      ['saleAddress',previous?.address,original.sale.address]
-    ]) {
-      const field = fields.namedItem(name);
-      if (!field.value || field.value === oldValue) field.value = newValue ?? '';
-    }
+    const address = fields.namedItem('saleAddress');
+    if (!address.value || address.value === deliveryAddress(previous)) address.value = deliveryAddress(original.sale);
   }
 });
 $('closeScan').onclick = () => {
