@@ -48,6 +48,15 @@
 #paymentList .row{align-items:start}
 #paymentList strong{white-space:nowrap}
 #paymentList h3{min-width:0}
+#tabs button[data-tab="sold"]{position:relative;padding-inline:17px}
+.pending-count{display:inline-grid;place-items:center;min-width:20px;padding:2px 5px;border-radius:20px;background:#087642;color:white;font-size:11px;font-weight:700;line-height:16px;font-variant-numeric:tabular-nums}
+#tabs .pending-count{position:absolute;top:2px;right:2px;transform:translateX(20%);pointer-events:none}
+.pending-shipments{margin:0 0 14px;border:1px solid var(--line);border-radius:14px;background:white}
+.pending-shipments>summary{padding:12px;min-height:44px;color:var(--blue);cursor:pointer;font-weight:700}
+.pending-shipments>summary .pending-count{margin-left:6px;vertical-align:middle}
+.pending-shipments[open]{padding-bottom:10px}
+.pending-shipments-content{padding:0 10px}
+.pending-shipments-content>.group:first-child{margin-top:4px}
 </style>
 <main id="hub" class="hub">
 <h1 tabindex="-1">闲鱼</h1>
@@ -198,6 +207,7 @@ const money = cents => '¥' + (cents/100).toLocaleString('zh-CN',{minimumFractio
 const status = item => item.service?.state === 'returned' ? 'returned' : item.service?.state ?? (item.sale ? 'sold' : 'available');
 const inStock = item => !item.sale || status(item) === 'returned';
 const activeSale = item => item.sale && status(item) !== 'returned';
+const needsTracking = item => activeSale(item) && !String(item.sale.tracking ?? '').trim();
 const imeiPattern = /^\d{15}$/;
 const itemNumberPattern = /^\d{20}$/;
 let page = 'stock';
@@ -350,8 +360,13 @@ function render() {
   const addLabel = {stock:'＋ 入库',inbound:'＋ 录入',sold:'＋ 直接出库'};
   $('add').hidden = !addLabel[page];
   $('add').textContent = addLabel[page] || '';
-  $('tabs').innerHTML = Object.entries(names).map(([code,label]) =>
-    `<button data-tab="${code}" aria-current="${code === page}">${label}</button>`).join('');
+  const pendingCount = items.filter(needsTracking).length;
+  $('tabs').innerHTML = Object.entries(names).map(([code,label]) => {
+    const showCount = code === 'sold' && pendingCount > 0;
+    const badge = showCount ? `<span class="pending-count" aria-hidden="true">${pendingCount}</span>` : '';
+    const description = showCount ? ` aria-label="出库，${pendingCount} 单未填单号"` : '';
+    return `<button data-tab="${code}" aria-current="${code === page}"${description}>${label}${badge}</button>`;
+  }).join('');
   const query = $('query').value.trim().toLowerCase();
   const filter = $('filter').value;
   const rows = items.filter(item => {
@@ -369,17 +384,33 @@ function render() {
     : [[page === 'stock' ? '在库数量' : '入库数量',rows.length+' 台'],['设备成本',cost(rows)]];
   $('summaryTitle').textContent = names[page]+' · 当前筛选统计';
   $('metrics').innerHTML = stats.map(([label,value]) => `<div class="metric"><small>${label}</small><strong>${value}</strong></div>`).join('');
-  const groups = new Map();
+  const records = $('records');
+  const pending = [];
+  const regular = [];
   for (const item of rows.sort((a,b) => dateFor(b).localeCompare(dateFor(a)))) {
+    (page === 'sold' && needsTracking(item) ? pending : regular).push(item);
+  }
+  const shipOpen = Boolean(query) || records.querySelector('#pendingShipments')?.open;
+  const pendingSection = pending.length ? `<details class="pending-shipments" id="pendingShipments"${shipOpen ? ' open' : ''}>
+    <summary>未发货 · 未填单号 <span class="pending-count">${pending.length}</span></summary>
+    <div class="pending-shipments-content">${renderRecordGroups(pending,cost)}</div>
+  </details>` : '';
+  records.innerHTML = (pendingSection + renderRecordGroups(regular,cost)) || '<p class="empty">'+
+    (storageError ? '本机数据无法读取，请从有效备份恢复。' : '暂无符合条件的记录。')+'</p>';
+}
+
+function renderRecordGroups(rows,cost) {
+  const groups = new Map();
+  for (const item of rows) {
     const date = dateFor(item);
     if (!groups.has(date)) groups.set(date,[]);
     groups.get(date).push(item);
   }
-  $('records').innerHTML = [...groups].map(([date,list]) => {
+  return [...groups].map(([date,list]) => {
     const caption = page === 'profit' || page === 'sold' ? totals(list).map(pair => pair.join(' ')).join(' · ')
       : `${list.length} 条${page === 'service' ? '' : ' · 成本 '+cost(list)}`;
     return `<section class="group"><h3>${escape(date)}</h3><p class="muted">${caption}</p>${list.map(card).join('')}</section>`;
-  }).join('') || '<p class="empty">'+(storageError ? '本机数据无法读取，请从有效备份恢复。' : '暂无符合条件的记录。')+'</p>';
+  }).join('');
 }
 
 const requiredMark = '<span class="required-mark" aria-hidden="true"> *</span>';
@@ -732,7 +763,10 @@ $('scanPanel').addEventListener('close',() => {
 });
 window.addEventListener('pagehide',stopScan);
 
-$('tabs').onclick = event => { if (event.target.dataset.tab) tab(event.target.dataset.tab); };
+$('tabs').onclick = event => {
+  const button = event.target.closest('button[data-tab]');
+  if (button) tab(button.dataset.tab);
+};
 $('add').onclick = () => openForm(page === 'sold' ? 'direct' : 'device');
 $('cancel').onclick = () => $('editor').close();
 $('query').oninput = render;
