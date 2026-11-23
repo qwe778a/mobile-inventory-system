@@ -57,6 +57,17 @@
 .pending-shipments[open]{padding-bottom:10px}
 .pending-shipments-content{padding:0 10px}
 .pending-shipments-content>.group:first-child{margin-top:4px}
+
+.pending-shipments-panel{position:relative}
+.pending-shipments-panel>.pending-shipments>summary{display:flow-root;padding-right:152px;min-height:60px}
+.pending-shipments-panel>.pending-shipments>summary::before{content:'▸';margin-right:5px}
+.pending-shipments-panel>.pending-shipments[open]>summary::before{content:'▾'}
+.pending-shipments-panel>.pending-shipments>summary::-webkit-details-marker{display:none}
+.pending-shipments-panel>.pending-shipments>summary{list-style:none}
+.batch-tracking-trigger{position:absolute;top:8px;right:8px;min-height:44px;padding-inline:10px;font-size:14px}
+#batchTrackingDialog .batch-tracking-order{margin:8px 0}
+#batchTrackingDialog .sale-address{margin-bottom:10px}
+#batchTrackingNotice{color:#9a301e}
 </style>
 <main id="hub" class="hub">
 <h1 tabindex="-1">闲鱼</h1>
@@ -185,6 +196,15 @@
   <div class="actions"><button class="primary">保存</button><button id="cancelDropService" type="button">取消</button></div>
 </form></dialog>
 <dialog id="dropDetail"><h2>订单详情</h2><dl class="drop-details" id="dropDetailRows"></dl><div class="actions"><button id="closeDropDetail" type="button">关闭</button></div></dialog>
+<dialog id="batchTrackingDialog" aria-labelledby="batchTrackingTitle">
+  <h2 id="batchTrackingTitle">一键填入单号</h2>
+  <p id="batchTrackingHint" class="muted">按订单填写单号，留空的订单继续待填。</p>
+  <form id="batchTrackingForm" aria-describedby="batchTrackingHint">
+    <div id="batchTrackingRows"></div>
+    <output id="batchTrackingNotice" role="alert"></output>
+    <div class="actions"><button class="primary" type="submit">保存已填单号</button><button id="batchTrackingCancel" type="button">取消</button></div>
+  </form>
+</dialog>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
 <dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><div class="scan-preview"><video id="scanVideo" autoplay playsinline muted></video><div class="scan-guide" aria-hidden="true"></div></div><div class="actions"><button type="button" id="pickScanPhoto">从照片识别</button><button type="button" id="closeScan">关闭扫码</button></div><input id="scanPhoto" type="file" accept="image/*" hidden></dialog>
 <dialog id="backupPanel"><h2>数据备份</h2><p>一份 JSON 包含拍机堂、代发、超擦支出和货款明细。导入会覆盖备份所含模块的当前数据。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
@@ -391,10 +411,12 @@ function render() {
     (page === 'sold' && needsTracking(item) ? pending : regular).push(item);
   }
   const shipOpen = Boolean(query) || records.querySelector('#pendingShipments')?.open;
-  const pendingSection = pending.length ? `<details class="pending-shipments" id="pendingShipments"${shipOpen ? ' open' : ''}>
+  const pendingSection = pending.length ? `<div class="pending-shipments-panel"><details class="pending-shipments" id="pendingShipments"${shipOpen ? ' open' : ''}>
     <summary>未发货 · 未填单号 <span class="pending-count">${pending.length}</span></summary>
     <div class="pending-shipments-content">${renderRecordGroups(pending,cost)}</div>
-  </details>` : '';
+  </details>
+    <button type="button" class="batch-tracking-trigger" data-batch-tracking>一键填入单号</button>
+  </div>` : '';
   records.innerHTML = (pendingSection + renderRecordGroups(regular,cost)) || '<p class="empty">'+
     (storageError ? '本机数据无法读取，请从有效备份恢复。' : '暂无符合条件的记录。')+'</p>';
 }
@@ -562,7 +584,43 @@ $('form').addEventListener('submit',event => {
   } catch (error) { $('notice').textContent = error.message; }
 });
 
+function openBatchTracking() {
+  const pending = items.filter(needsTracking).sort((a,b) => b.sale.date.localeCompare(a.sale.date));
+  $('batchTrackingRows').innerHTML = pending.map(item => `<article class="batch-tracking-order">
+    <h3>${escape(item.model)} ${escape(item.capacity)}</h3>
+    <p class="muted">${escape(item.sale.date)} · ${escape(item.sale.channel || '未填写销售渠道')} · ${money(item.sale.price)}</p>
+    <p class="muted">物品编号 ${escape(item.serial)} · IMEI ${escape(item.imei)}</p>
+    ${item.sale.address ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(item.sale.address)}</p></details>` : ''}
+    ${field(item.id,'快递单号','','maxlength="100" autocapitalize="off" spellcheck="false"')}
+  </article>`).join('');
+  $('batchTrackingNotice').textContent = '';
+  $('batchTrackingDialog').showModal();
+}
+
+$('batchTrackingCancel').onclick = () => $('batchTrackingDialog').close();
+$('batchTrackingForm').onsubmit = event => {
+  event.preventDefault();
+  const assignments = new Map([...new FormData(event.currentTarget)]
+    .map(([id,tracking]) => [id,tracking.trim()]).filter(([,tracking]) => tracking));
+  try {
+    if (!assignments.size) throw Error('请至少填写一个单号。');
+    const pending = items.filter(item => assignments.has(item.id) && needsTracking(item));
+    if (pending.length !== assignments.size) throw Error('待填订单已更新，请重新打开后填写。');
+    const next = items.map(item => assignments.has(item.id)
+      ? {...item,sale:{...item.sale,tracking:assignments.get(item.id)}} : item);
+    save(next,'批量填写单号',pending.map(item => `物品编号 ${item.serial} · 单号 ${assignments.get(item.id)}`).join('；'));
+    $('batchTrackingDialog').close();
+    render();
+  } catch (error) {
+    $('batchTrackingNotice').textContent = error.message;
+  }
+};
+
 $('records').addEventListener('click',event => {
+  if (event.target.closest('button[data-batch-tracking]')) {
+    openBatchTracking();
+    return;
+  }
   const button = event.target.closest('button[data-command]');
   if (!button) return;
   const item = items.find(row => row.id === button.dataset.id);
