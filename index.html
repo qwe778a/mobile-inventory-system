@@ -329,23 +329,36 @@ function dateFor(item) {
   return status(item) === 'returned' && page === 'stock' ? item.service.date : item.inbound;
 }
 
+function originalExchangeSale(sale) {
+  if (!sale.exchangeFor) return undefined;
+  return items.find(row => row.sale?.exchangeGroup === sale.exchangeFor)?.sale ?? sale.originalSale;
+}
+
+function salePrice(sale) {
+  if (!sale.exchangeFor || sale.exchangePriceIsTotal) return sale.price;
+  // Older replacement orders stored only the amount paid on top of the original price.
+  const originalPrice = originalExchangeSale(sale)?.price;
+  return sale.price + (Number.isSafeInteger(originalPrice) ? originalPrice : 0);
+}
+
 function saleCharges(item) {
-  const address = String(item.sale.address ?? '').trim();
+  const original = originalExchangeSale(item.sale);
+  const address = String(item.sale.address || original?.address || '').trim();
   const region = address.match(/北京|天津|河北|山西|内蒙古|辽宁|吉林|黑龙江|上海|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|广西|海南|重庆|四川|贵州|云南|西藏|陕西|甘肃|青海|宁夏|新疆|台湾|香港|澳门/)?.[0];
   const rate = ['北京','上海'].includes(region) ? 400 :
     ['海南','宁夏','青海'].includes(region) ? 700 :
     ['西藏','新疆'].includes(region) ? 1500 : 300;
-  const original = item.sale.exchangeFor && items.find(row => row.sale?.exchangeGroup === item.sale.exchangeFor);
-  const trips = original?.service?.reason === '换货' ? 0 : item.service?.reason === '换货' ? 3 : 1;
-  const channel = item.sale.originalSale?.channel ?? item.sale.channel;
-  const fee = String(channel ?? '').trim() === '代发' ? 0 : Math.round(item.sale.price * 16 / 1000);
+  const trips = item.sale.exchangeFor || item.service?.reason === '换货' ? 3 : 1;
+  const channel = original?.channel ?? item.sale.channel;
+  const price = salePrice(item.sale);
+  const fee = String(channel ?? '').trim() === '代发' ? 0 : Math.round(price * 16 / 1000);
   const freight = rate * trips;
-  return {fee,freight,trips,region,net:item.sale.price-item.cost-fee-freight};
+  return {fee,freight,trips,region,net:price-item.cost-fee-freight};
 }
 
 function totals(rows) {
   const sales = rows.filter(activeSale);
-  const revenue = sales.reduce((sum,item) => sum + item.sale.price,0);
+  const revenue = sales.reduce((sum,item) => sum + salePrice(item.sale),0);
   const cost = sales.reduce((sum,item) => sum + item.cost,0);
   const metrics = [['有效出库',sales.length+' 台'],['销售额',money(revenue)],['销售成本',money(cost)],['毛利润',money(revenue-cost)]];
   if (page === 'profit') {
@@ -360,15 +373,15 @@ function action(label, command, item, style = '') {
   return `<button class="${style}" data-command="${command}" data-id="${item.id}">${label}</button>`;
 }
 
-function card(item) {
+function card(item, showProfit = page === 'profit') {
   const historyInfo = item.history?.length ? `<details><summary>历史退货（${item.history.length} 笔）</summary>
-    ${item.history.map(entry => `<p>出库 ${escape(entry.sale.date)} · ${money(entry.sale.price)} ${entry.sale.tracking ? '· 单号 '+escape(entry.sale.tracking) : ''} · 退货 ${escape(entry.service.date)} · ${escape(entry.service.reason)}</p>`).join('')}</details>` : '';
+    ${item.history.map(entry => `<p>出库 ${escape(entry.sale.date)} · ${money(salePrice(entry.sale))} ${entry.sale.tracking ? '· 单号 '+escape(entry.sale.tracking) : ''} · 退货 ${escape(entry.service.date)} · ${escape(entry.service.reason)}</p>`).join('')}</details>` : '';
   const tracking = item.sale?.tracking ? `<p class="muted">单号 ${escape(item.sale.tracking)}</p>` : '';
   const saleInfo = item.sale && page !== 'stock' && page !== 'inbound'
-    ? `<p>售价 ${money(item.sale.price)} · ${escape(item.sale.channel || '未填写销售渠道')}</p>` : '';
+    ? `<p>售价 ${money(salePrice(item.sale))} · ${escape(item.sale.channel || '未填写销售渠道')}</p>` : '';
   const saleAddress = page === 'sold' && item.sale?.address
     ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(item.sale.address)}</p></details>` : '';
-  const charges = page === 'profit' ? saleCharges(item) : null;
+  const charges = showProfit ? saleCharges(item) : null;
   const profitInfo = charges ? `<p><strong>实际利润 ${money(charges.net)}</strong></p>
     <p class="muted">手续费 ${money(charges.fee)} · 运费 ${money(charges.freight)}（${charges.trips} 程${charges.region ? ' · '+charges.region : ' · 未识别地区，按 ¥3/程'}）</p>` : '';
   const service = item.service;
@@ -423,8 +436,8 @@ function matchesInventorySearch(item,query) {
 }
 
 function outboundGroups(rows) {
-  const visible = new Set(rows.map(item => item.id));
   const originals = new Map(items.filter(item => item.sale?.exchangeGroup).map(item => [item.sale.exchangeGroup,item]));
+  const returnedGroups = new Set(items.flatMap(item => (item.history ?? []).map(entry => entry.sale.exchangeFor).filter(Boolean)));
   const pairs = new Map(items.filter(item => item.sale?.exchangeFor).map(replacement => {
     const {exchangeFor,originalSale} = replacement.sale;
     return [exchangeFor,{original:originals.get(exchangeFor),snapshot:originalSale,replacement}];
@@ -432,19 +445,21 @@ function outboundGroups(rows) {
   const shown = new Set();
   return rows.flatMap(item => {
     const pair = pairs.get(item.sale.exchangeFor || item.sale.exchangeGroup);
-    if (!pair) return [{item,pendingCount:Number(Boolean(needsTracking(item))),rows:[item]}];
+    if (!pair) {
+      const replaced = returnedGroups.has(item.sale.exchangeGroup);
+      return [{item,pendingCount:Number(Boolean(needsTracking(item))),rows:replaced ? [] : [item]}];
+    }
     if (shown.has(pair)) return [];
     shown.add(pair);
-    const members = [pair.original,pair.replacement].filter(member => member && visible.has(member.id));
     const pendingCount = [pair.original,pair.replacement].filter(member => member && needsTracking(member)).length;
-    return [{item:pair.replacement,pendingCount,rows:members,pair}];
+    return [{item:pair.replacement,pendingCount,rows:[pair.replacement],pair}];
   });
 }
 
 function renderOutboundEntry(entry) {
   if (!entry.pair) return card(entry.item);
   const {original,snapshot,replacement} = entry.pair;
-  const originalView = original ? card(original) : `<article><h3>${escape(snapshot?.model)} ${escape(snapshot?.capacity)}</h3>
+  const originalView = original ? card(original,false) : `<article><h3>${escape(snapshot?.model)} ${escape(snapshot?.capacity)}</h3>
     <p class="muted">物品编号 ${escape(snapshot?.serial)} · IMEI ${escape(snapshot?.imei)}</p>
     <p>出库 ${escape(snapshot?.date)} · 售价 ${money(snapshot?.price ?? 0)}</p>
     ${snapshot?.tracking ? `<p class="muted">单号 ${escape(snapshot.tracking)}</p>` : ''}</article>`;
@@ -468,11 +483,16 @@ function render() {
   const query = $('query').value.trim().toLowerCase();
   const filter = $('filter').value;
   const rows = items.filter(item => {
-    if (!({stock:inStock(item),inbound:item.inbound,sold:item.sale,profit:activeSale(item),service:item.service})[page]) return false;
+    if (!({stock:inStock(item),inbound:item.inbound,sold:item.sale,profit:item.sale,service:item.service})[page]) return false;
     return (!filter || status(item) === filter) && (!query || matchesInventorySearch(item,query));
   });
+  const ordered = rows.sort((a,b) => dateFor(b).localeCompare(dateFor(a)));
+  const outbound = page === 'sold' || page === 'profit';
+  let entries = outbound ? outboundGroups(ordered) : ordered.map(item => ({item,rows:[item]}));
+  if (page === 'profit') entries = entries.filter(entry => entry.rows.some(activeSale));
+  if (outbound) entries.sort((a,b) => dateFor(b.item).localeCompare(dateFor(a.item)));
   const cost = list => money(list.reduce((sum,item) => sum+item.cost,0));
-  const stats = page === 'profit' || page === 'sold' ? totals(rows) : page === 'service'
+  const stats = outbound ? totals(entries.flatMap(entry => entry.rows)) : page === 'service'
     ? [['售后记录',rows.length+' 单'],['处理中',rows.filter(item => status(item) === 'open').length+' 单']]
     : [[page === 'stock' ? '在库数量' : '入库数量',rows.length+' 台'],['设备成本',cost(rows)]];
   $('summaryTitle').textContent = names[page]+' · 当前筛选统计';
@@ -480,10 +500,8 @@ function render() {
   const records = $('records');
   const pending = [];
   const regular = [];
-  const ordered = rows.sort((a,b) => dateFor(b).localeCompare(dateFor(a)));
-  const entries = page === 'sold' ? outboundGroups(ordered) : ordered.map(item => ({item,rows:[item]}));
   for (const entry of entries) {
-    (entry.pendingCount ? pending : regular).push(entry);
+    (page === 'sold' && entry.pendingCount ? pending : regular).push(entry);
   }
   const shipOpen = Boolean(query) || records.querySelector('#pendingShipments')?.open;
   const pendingSection = pending.length ? `<div class="pending-shipments-panel"><details class="pending-shipments" id="pendingShipments"${shipOpen ? ' open' : ''}>
@@ -592,7 +610,7 @@ function renderExchangeOriginals() {
   $('exchangeOriginalResults').innerHTML = candidates.map(item => `<label class="exchange-option">
     <input type="radio" name="exchangeChoice" value="${escape(item.id)}"${item.id === chosen ? ' checked' : ''}>
     <span><strong>${escape(item.model)} ${escape(item.capacity)}</strong> · ${escape(item.sale.date)}<br>
-    物品编号 ${escape(item.serial)} · 单号 ${escape(item.sale.tracking || '—')}
+    原单售价 ${money(item.sale.price)} · 物品编号 ${escape(item.serial)} · 单号 ${escape(item.sale.tracking || '—')}
     ${salePhones(item.sale).map(phone => ' · 手机尾号 '+phone.slice(-4)).join('')}</span></label>`
   ).join('') || `<p class="muted">${query ? '没有找到可关联的出库单。' : '输入手机号或快递单号后查找。'}</p>`;
   if (group && !chosen) $('exchangeOriginalResults').insertAdjacentHTML('afterbegin','<p class="muted">已关联历史原单。可保留原关联，或重新选择一笔。</p>');
@@ -604,15 +622,18 @@ function syncExchangeSale() {
   const panel = $('exchangeSalePick');
   panel.hidden = !exchange;
   panel.disabled = !exchange;
-  $('salePriceLabel').textContent = exchange ? '换货补差（元）' : '售价（元）';
+  $('salePriceLabel').textContent = exchange ? '换货售价（元）' : '售价（元）';
   const price = fields.namedItem('price');
-  if (exchange && !price.value) {
-    price.value = '0';
-    price.dataset.exchangeDefault = '1';
-  } else if (!exchange && price.dataset.exchangeDefault && price.value === '0') {
-    price.value = '';
-    delete price.dataset.exchangeDefault;
+  if (exchange && price.dataset.exchange !== 'true') {
+    price.dataset.normalPrice = price.dataset.exchange === 'false' ? price.value : '';
+    const existing = mode === 'saleEdit' && selected.sale.exchangeFor ? selected.sale : null;
+    const originalId = fields.namedItem('exchangeOriginalId').value;
+    const original = items.find(row => row.id === originalId);
+    price.value = existing ? salePrice(existing)/100 : original ? original.sale.price/100 : '';
+  } else if (!exchange && price.dataset.exchange === 'true') {
+    price.value = price.dataset.normalPrice;
   }
+  price.dataset.exchange = String(exchange);
   if (exchange) renderExchangeOriginals();
 }
 
@@ -624,7 +645,7 @@ function setExchangeLink(item,original,previousGroup) {
   const group = original.sale.exchangeGroup || crypto.randomUUID();
   item.sale.exchangeFor = group;
   item.sale.originalSale = {model:original.model,capacity:original.capacity,serial:original.serial,
-    imei:original.imei,date:original.sale.date,price:original.sale.price,channel:original.sale.channel,tracking:original.sale.tracking,phone:salePhones(original.sale)[0]};
+    imei:original.imei,date:original.sale.date,price:original.sale.price,channel:original.sale.channel,tracking:original.sale.tracking,phone:salePhones(original.sale)[0],address:original.sale.address};
   return items.map(row => {
     if (row.id === original.id) return {...row,sale:{...row.sale,exchangeGroup:group}};
     if (previousGroup && previousGroup !== group && row.sale?.exchangeGroup === previousGroup) {
@@ -746,9 +767,11 @@ $('form').addEventListener('submit',event => {
         }
         if (original && values.date < original.sale.date) throw Error('换货出库日期不能早于原出库日期。');
         records = setExchangeLink(item,original,previous?.exchangeFor);
+        item.sale.exchangePriceIsTotal = true;
       } else if (previous?.exchangeFor) {
         delete item.sale.exchangeFor;
         delete item.sale.originalSale;
+        delete item.sale.exchangePriceIsTotal;
         records = items.map(row => {
           if (row.sale?.exchangeGroup !== previous.exchangeFor) return row;
           const sale = {...row.sale};
@@ -783,7 +806,7 @@ function openBatchTracking() {
   const pending = items.filter(needsTracking).sort((a,b) => b.sale.date.localeCompare(a.sale.date));
   $('batchTrackingRows').innerHTML = pending.map(item => `<article class="batch-tracking-order">
     <h3>${escape(item.model)} ${escape(item.capacity)}</h3>
-    <p class="muted">${escape(item.sale.date)} · ${escape(item.sale.channel || '未填写销售渠道')} · ${money(item.sale.price)}</p>
+    <p class="muted">${escape(item.sale.date)} · ${escape(item.sale.channel || '未填写销售渠道')} · ${money(salePrice(item.sale))}</p>
     <p class="muted">物品编号 ${escape(item.serial)} · IMEI ${escape(item.imei)}</p>
     ${item.sale.address ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(item.sale.address)}</p></details>` : ''}
     ${field(item.id,'快递单号','','maxlength="100" autocapitalize="off" spellcheck="false"')}
@@ -1026,6 +1049,7 @@ $('fields').addEventListener('change',event => {
     if (!original) return;
     const originalId = fields.namedItem('exchangeOriginalId');
     const previous = items.find(row => row.id === originalId.value)?.sale;
+    if (originalId.value !== original.id) fields.namedItem('price').value = original.sale.price/100;
     originalId.value = original.id;
     for (const [name,oldValue,newValue] of [
       ['salePhone',previous?.phone || salePhones(previous)[0],original.sale.phone || salePhones(original.sale)[0]],
