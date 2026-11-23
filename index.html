@@ -6,6 +6,9 @@
 <style>
 :root{font:16px system-ui,-apple-system,sans-serif;color:#172d49;background:#f2f6fc;--blue:#174a92;--line:#d7e2f2}
 *{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eefb;color:var(--blue);font-weight:650}button.primary{background:var(--blue);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#4c607c}.hero{margin:22px 0;background:var(--blue);color:white;border-radius:22px;padding:20px}.hero small{color:#dbeaff}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eefb;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#d9e8ff}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102b50aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
+.profit-day-controls{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin-top:12px}
+.profit-day-controls label{flex:1 0 152px;max-width:220px}
+.profit-day-controls input{color:#172d49}
 .scan-field{display:grid;gap:6px;align-content:start;min-width:0}.scan-field button{justify-self:start}.scan-preview{position:relative;height:min(48dvh,420px);background:#172d49;border-radius:12px;overflow:hidden}
 #scanVideo{display:block;width:100%;height:100%;object-fit:contain}
 .scan-guide{position:absolute;inset:10%;border:2px solid #e5efff;border-radius:14px;pointer-events:none;box-shadow:0 0 0 100vmax #08245144}
@@ -91,7 +94,15 @@
 </main>
 <main id="inventory" hidden>
 <header><div class="inventory-title"><button type="button" data-home>首页</button><h1 tabindex="-1">拍机堂出入库</h1></div><details class="more" id="more"><summary aria-label="更多">•••</summary><div class="more-options"><button id="logs">日志</button></div></details></header>
-<section class="hero" aria-label="统计"><small id="summaryTitle"></small><div class="metrics" id="metrics"></div></section>
+<section class="hero" aria-label="统计">
+  <small id="summaryTitle" aria-live="polite"></small>
+  <div id="profitDayControls" class="profit-day-controls" hidden>
+    <label>单日查询（按出库日期）<input id="profitDay" type="date"></label>
+    <button id="profitToday" type="button">今天</button>
+    <button id="profitAllDays" type="button">全部日期</button>
+  </div>
+  <div class="metrics" id="metrics"></div>
+</section>
 <div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button></div>
 <div class="filters">
 <label class="wide">搜索<span class="search-input">
@@ -544,20 +555,25 @@ function render() {
   }).join('');
   const query = $('query').value.trim().toLowerCase();
   const filter = $('filter').value;
-  const recordsForPage = page === 'profit' ? [...items,...archivedSales()] : items;
+  const profitPage = page === 'profit';
+  $('profitDayControls').hidden = !profitPage;
+  const profitDay = profitPage ? $('profitDay').value : '';
+  const recordsForPage = profitPage ? [...items,...archivedSales()] : items;
   const rows = recordsForPage.filter(item => {
     if (!({stock:inStock(item),inbound:item.inbound || status(item) === 'returned',sold:item.sale,profit:item.sale,service:item.service})[page]) return false;
     return (!filter || status(item) === filter) && (!query || matchesInventorySearch(item,query,page !== 'profit'));
   });
   const ordered = rows.sort((a,b) => dateFor(b).localeCompare(dateFor(a)));
   const outbound = page === 'sold' || page === 'profit';
-  const entries = outbound ? outboundGroups(ordered) : ordered.map(item => ({item,rows:[item]}));
+  const entries = outbound
+    ? outboundGroups(ordered).filter(entry => !profitDay || dateFor(entry.item) === profitDay)
+    : ordered.map(item => ({item,rows:[item]}));
   if (outbound) entries.sort((a,b) => dateFor(b.item).localeCompare(dateFor(a.item)));
   const cost = list => money(list.reduce((sum,item) => sum+item.cost,0));
   const stats = outbound ? totals(entries.flatMap(entry => entry.rows)) : page === 'service'
     ? [['售后记录',rows.length+' 单'],['处理中',rows.filter(item => status(item) === 'open').length+' 单']]
     : [[page === 'stock' ? '在库数量' : '入库数量',rows.length+' 台'],['设备成本',cost(rows)]];
-  $('summaryTitle').textContent = names[page]+' · 当前筛选统计';
+  $('summaryTitle').textContent = names[page]+' · '+(profitDay ? profitDay+' 出库统计' : '当前筛选统计');
   $('metrics').innerHTML = stats.map(([label,value]) => `<div class="metric"><small>${label}</small><strong>${value}</strong></div>`).join('');
   const records = $('records');
   const pending = [];
@@ -573,7 +589,7 @@ function render() {
     <button type="button" class="batch-tracking-trigger" data-batch-tracking>一键填入单号</button>
   </div>` : '';
   records.innerHTML = (pendingSection + renderRecordGroups(regular,cost)) || '<p class="empty">'+
-    (storageError ? '本机数据无法读取，请从有效备份恢复。' : '暂无符合条件的记录。')+'</p>';
+    (storageError ? '本机数据无法读取，请从有效备份恢复。' : profitDay ? '当天暂无符合条件的出库记录。' : '暂无符合条件的记录。')+'</p>';
 }
 
 function renderRecordGroups(rows,cost) {
@@ -1154,8 +1170,18 @@ $('add').onclick = () => openForm(page === 'sold' ? 'direct' : 'device');
 $('cancel').onclick = () => $('editor').close();
 $('query').oninput = render;
 $('filter').onchange = render;
+$('profitDay').oninput = render;
+$('profitToday').onclick = () => {
+  $('profitDay').value = today();
+  render();
+};
+$('profitAllDays').onclick = () => {
+  $('profitDay').value = '';
+  render();
+};
 $('reset').onclick = () => {
   for (const id of ['query','filter']) $(id).value = '';
+  if (page === 'profit') $('profitDay').value = '';
   render();
 };
 function describeItem(item) {
