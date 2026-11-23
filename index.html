@@ -769,10 +769,9 @@ $('form').addEventListener('submit',event => {
       item.service = {date,reason,quality,state,progress,note,returnTracking};
       if (reason === '换货') item.service.exchangeTracking = exchangeTracking;
     }
-    const actionName = {
-      device:selected ? '编辑设备' : '新增入库', direct:'直接出库', sell:'标记售出',
-      saleEdit:'编辑出库', service:(selected?.service ? '更新售后 · ' : '新增售后 · ')+values.reason+' · '+states[item.service.state]
-    }[mode];
+    const actionName = mode === 'service'
+      ? (selected?.service ? '更新售后 · ' : '新增售后 · ')+values.reason+' · '+states[item.service.state]
+      : {device:selected ? '编辑设备' : '新增入库',direct:'直接出库',sell:'标记售出',saleEdit:'编辑出库'}[mode];
     save(selected ? records.map(old => old.id === item.id ? item : old) : [...records,item], actionName, describeItem(item));
     $('query').value = '';
     $('editor').close();
