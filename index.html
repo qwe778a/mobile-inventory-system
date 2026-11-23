@@ -56,10 +56,11 @@
   <button class="hub-option" id="openDropship"><span><strong>代发</strong><small>管理代发订单、发货状态与利润</small></span><span class="arrow" aria-hidden="true">›</span></button>
   <button class="hub-option" id="openExpenses" type="button"><span><strong>超擦支出</strong><small>记录每日金额，查看每月总支出</small></span><span class="arrow" aria-hidden="true">›</span></button>
   <button class="hub-option" id="openPayments" type="button"><span><strong>货款明细</strong><small>录入货款，查看明细和合计</small></span><span class="arrow" aria-hidden="true">›</span></button>
+  <button class="hub-option" id="backup" type="button"><span><strong>数据备份</strong><small>导出或恢复四个模块的数据</small></span><span class="arrow" aria-hidden="true">›</span></button>
 </div>
 </main>
 <main id="inventory" hidden>
-<header><div class="inventory-title"><button type="button" data-home>首页</button><h1 tabindex="-1">拍机堂出入库</h1></div><details class="more" id="more"><summary aria-label="更多">•••</summary><div class="more-options"><button id="backup">数据备份</button><button id="logs">日志</button></div></details></header>
+<header><div class="inventory-title"><button type="button" data-home>首页</button><h1 tabindex="-1">拍机堂出入库</h1></div><details class="more" id="more"><summary aria-label="更多">•••</summary><div class="more-options"><button id="logs">日志</button></div></details></header>
 <section class="hero" aria-label="统计"><small id="summaryTitle"></small><div class="metrics" id="metrics"></div></section>
 <div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button></div>
 <div class="filters">
@@ -177,7 +178,7 @@
 <dialog id="dropDetail"><h2>订单详情</h2><dl class="drop-details" id="dropDetailRows"></dl><div class="actions"><button id="closeDropDetail" type="button">关闭</button></div></dialog>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
 <dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><div class="scan-preview"><video id="scanVideo" autoplay playsinline muted></video><div class="scan-guide" aria-hidden="true"></div></div><div class="actions"><button type="button" id="pickScanPhoto">从照片识别</button><button type="button" id="closeScan">关闭扫码</button></div><input id="scanPhoto" type="file" accept="image/*" hidden></dialog>
-<dialog id="backupPanel"><h2>数据备份</h2><p>数据保存在当前浏览器。换设备或清除浏览器数据前，请先导出。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
+<dialog id="backupPanel"><h2>数据备份</h2><p>一份 JSON 包含拍机堂、代发、超擦支出和货款明细。导入会覆盖备份所含模块的当前数据。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
 <dialog id="logPanel"><div class="row"><h2>操作日志</h2><button id="closeLog">关闭</button></div><ul id="logList"></ul></dialog>
 <script>
 'use strict';
@@ -753,10 +754,6 @@ $('more').addEventListener('keydown',event => {
     $('more').querySelector('summary').focus();
   }
 });
-$('backup').onclick = () => {
-  $('more').open = false;
-  $('backupPanel').showModal();
-};
 $('logs').onclick = () => {
   $('more').open = false;
   $('logList').innerHTML = logs.map(entry =>
@@ -765,35 +762,6 @@ $('logs').onclick = () => {
   $('logPanel').showModal();
 };
 $('closeLog').onclick = () => $('logPanel').close();
-$('closeBackup').onclick = () => $('backupPanel').close();
-$('restore').onclick = () => $('file').click();
-$('export').onclick = () => {
-  if (storageError) { alert('当前数据无法正常读取'); return; }
-  const url = URL.createObjectURL(new Blob([JSON.stringify({version:1,items,logs},null,2)],{type:'application/json'}));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = '拍机堂出入库-'+today()+'.json';
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url),30000);
-};
-$('file').onchange = async event => {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
-  try {
-    const backup = JSON.parse(await file.text());
-    if (backup.version !== 1) throw Error('备份版本无效');
-    validate(backup.items);
-    const previousLogs = backup.logs === undefined ? logs : validateLogs(backup.logs);
-    if (!confirm('用这份备份替换当前所有数据？')) return;
-    save(backup.items,'导入备份','恢复 '+backup.items.length+' 台设备',{recover:true,previousLogs});
-    $('query').value = '';
-    $('backupPanel').close();
-    tab(page);
-  } catch (error) { alert('导入失败：'+error.message); }
-};
 window.addEventListener('storage',event => {
   if (event.key === key || event.key === null) location.reload();
 });
@@ -926,8 +894,11 @@ tab(page);
   let expenseDate;
   let expenseRecords = {};
 
-  function readExpenses() {
-    const records = JSON.parse(localStorage.getItem(expenseKey) ?? '{}');
+  function readExpenses(raw = localStorage.getItem(expenseKey)) {
+    return validateExpenses(JSON.parse(raw ?? '{}'));
+  }
+
+  function validateExpenses(records) {
     if (!records || typeof records !== 'object' || Array.isArray(records) ||
         Object.entries(records).some(([day,value]) => !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
           !Number.isSafeInteger(value) || value < 0 || value > maxExpense)) {
@@ -1027,7 +998,10 @@ tab(page);
   let paymentSelection;
 
   function readPayments(raw = localStorage.getItem(paymentKey)) {
-    const records = JSON.parse(raw ?? '[]');
+    return validatePayments(JSON.parse(raw ?? '[]'));
+  }
+
+  function validatePayments(records) {
     if (!Array.isArray(records) || records.some(record =>
       !record || typeof record.name !== 'string' || !record.name.trim() || !validPaymentAmount(record.amount) ||
       (record.id !== undefined && (typeof record.id !== 'string' || !/^[\w-]+$/.test(record.id))) ||
@@ -1290,6 +1264,102 @@ tab(page);
         saveDropship(dropState.orders.filter(o => o.id !== order.id),'删除订单',order);
       }
     } catch (error) { alert(error.message); }
+  };
+
+  function readInventoryBackup(raw) {
+    const data = JSON.parse(raw ?? 'null');
+    if (raw === null) return {items:[],logs:[]};
+    if (Array.isArray(data)) return {items:validate(data),logs:[]};
+    return {items:validate(data?.items),logs:validateLogs(data?.logs)};
+  }
+
+  function validateDropshipBackup(data) {
+    const optionalText = value => value == null || typeof value === 'string';
+    const amount = value => Number.isSafeInteger(value) && value >= 0;
+    if (!Array.isArray(data?.orders) || !Array.isArray(data.logs) ||
+      data.orders.some(order => !order || typeof order.id !== 'string' || typeof order.date !== 'string' ||
+        !Object.hasOwn(statusNames,order.status) || !amount(order.price) || !amount(order.cost) ||
+        !optionalText(order.tracking) || !optionalText(order.exchange?.tracking)) ||
+      data.logs.some(entry => !entry || typeof entry.action !== 'string' ||
+        !Number.isFinite(Date.parse(entry.at)))) throw Error('代发数据格式无效。');
+    return data;
+  }
+
+  function restoreFullBackup(backup) {
+    const inventory = readInventoryBackup(JSON.stringify(backup.inventory));
+    const modules = [
+      [dropKey,validateDropshipBackup(backup.dropship)],
+      [expenseKey,validateExpenses(backup.expenses)],
+      [paymentKey,validatePayments(backup.payments)]
+    ];
+    const keys = [key,...modules.map(([name]) => name)];
+    const previous = new Map(keys.map(name => [name,localStorage.getItem(name)]));
+    if (!confirm('用这份全站备份覆盖拍机堂、代发、超擦支出和货款明细的当前数据？')) return false;
+    if (keys.some(name => localStorage.getItem(name) !== previous.get(name)) || previous.get(key) !== source) {
+      throw Error('数据已在另一窗口更新，请刷新后重试。');
+    }
+    const written = [];
+    try {
+      for (const [name,value] of modules) {
+        localStorage.setItem(name,JSON.stringify(value));
+        written.push(name);
+      }
+      save(inventory.items,'导入备份','恢复全站数据',{recover:true,previousLogs:inventory.logs});
+    } catch (error) {
+      for (const name of written.reverse()) {
+        const raw = previous.get(name);
+        if (raw === null) localStorage.removeItem(name);
+        else localStorage.setItem(name,raw);
+      }
+      throw error;
+    }
+    readDropship();
+    return true;
+  }
+
+  $('backup').onclick = () => $('backupPanel').showModal();
+  $('closeBackup').onclick = () => $('backupPanel').close();
+  $('restore').onclick = () => $('file').click();
+  $('export').onclick = () => {
+    try {
+      const backup = {
+        version:2,
+        inventory:readInventoryBackup(localStorage.getItem(key)),
+        dropship:validateDropshipBackup(JSON.parse(localStorage.getItem(dropKey) ?? '{"orders":[],"logs":[]}')),
+        expenses:readExpenses(),
+        payments:readPayments()
+      };
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = '闲鱼全站备份-'+today()+'.json';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url),30000);
+    } catch (error) { alert('导出失败：'+error.message); }
+  };
+  $('file').onchange = async event => {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text());
+      if (backup?.version === 2) {
+        if (!restoreFullBackup(backup)) return;
+      } else if (backup?.version === 1) {
+        validate(backup.items);
+        const previousLogs = backup.logs === undefined ? logs : validateLogs(backup.logs);
+        if (!confirm('用这份旧备份覆盖当前拍机堂的数据？')) return;
+        save(backup.items,'导入备份','恢复 '+backup.items.length+' 台设备',{recover:true,previousLogs});
+      } else {
+        throw Error('备份版本无效。');
+      }
+      $('query').value = '';
+      $('backupPanel').close();
+      tab(page);
+      alert('备份已导入。');
+    } catch (error) { alert('导入失败：'+error.message); }
   };
 
   window.addEventListener('storage',event => {
