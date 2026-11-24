@@ -103,7 +103,7 @@
   </div>
   <div class="metrics" id="metrics"></div>
 </section>
-<div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button></div>
+<div class="row"><h2 id="heading"></h2><button class="primary" id="add"></button><button id="batchInboundOpen" type="button" hidden>一键入库</button></div>
 <div class="filters">
 <label class="wide">搜索<span class="search-input">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
@@ -227,6 +227,11 @@
   </form>
 </dialog>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
+<dialog id="batchInbound"><h2>一键入库</h2>
+<p>上传表格图片，核对识别出的 IMEI、成本和物品编号。默认型号为原机、容量为 128，进货渠道为拍机堂。</p>
+<label>表格图片<input id="batchImage" type="file" accept="image/*"></label>
+<p id="batchStatus" role="status"></p>
+<form id="batchForm"><div id="batchRows"></div><div class="actions"><button type="button" id="batchAddRow">添加一行</button><button class="primary" type="submit">确认入库</button><button type="button" id="batchClose">关闭</button></div></form></dialog>
 <dialog id="scanPanel"><h2>扫码录入物品编号</h2><p id="scanStatus" role="status"></p><div class="scan-preview"><video id="scanVideo" autoplay playsinline muted></video><div class="scan-guide" aria-hidden="true"></div></div><div class="actions"><button type="button" id="pickScanPhoto">从照片识别</button><button type="button" id="closeScan">关闭扫码</button></div><input id="scanPhoto" type="file" accept="image/*" hidden></dialog>
 <dialog id="backupPanel"><h2>数据备份</h2><p>一份 JSON 包含拍机堂、代发、超擦支出和货款明细。导入会覆盖备份所含模块的当前数据。</p><div class="actions"><button id="export">导出 JSON</button><button id="restore">导入备份</button><button id="closeBackup">关闭</button></div><input id="file" type="file" accept=".json,application/json" hidden></dialog>
 <dialog id="logPanel"><div class="row"><h2>操作日志</h2><button id="closeLog">关闭</button></div><ul id="logList"></ul></dialog>
@@ -271,7 +276,8 @@ const inStock = item => !item.sale || status(item) === 'returned';
 const activeSale = item => item.sale && status(item) !== 'returned' && item.service?.reason !== '退货';
 const needsTracking = item => activeSale(item) && !String(item.sale.tracking ?? '').trim();
 const imeiPattern = /^\d{15}$/;
-const itemNumberPattern = /^\d{20}$/;
+const itemNumberPattern = /^\d{4}$|^\d{20}$/;
+const itemCode = value => String(value ?? '').slice(-4);
 let page = 'stock';
 let storageError = false;
 let source = null;
@@ -299,13 +305,13 @@ function validate(data) {
   const date = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
     Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0,10) === value;
   const amount = value => Number.isSafeInteger(value) && value >= 0 && value <= 99999999999;
-  const ids = new Set(), imeis = new Set(), serials = new Set();
+  const ids = new Set(), imeis = new Set();
   if (!Array.isArray(data)) throw Error('备份格式无效');
   for (const item of data) {
     if (!item || typeof item.id !== 'string' || !/^[\w-]+$/.test(item.id) || ids.has(item.id) ||
         typeof item.model !== 'string' || !item.model.trim() || typeof item.imei !== 'string' ||
         !imeiPattern.test(item.imei) || imeis.has(item.imei) || typeof item.serial !== 'string' ||
-        !validItemCode(item.serial) || serials.has(item.serial.toUpperCase()) || !amount(item.cost) ||
+        !validItemCode(item.serial) || !amount(item.cost) ||
         (item.inbound !== null && !date(item.inbound)) ||
         (item.sale && (!date(item.sale.date) || !amount(item.sale.price) || item.sale.date < item.inbound)) ||
         (!item.sale && !item.inbound) ||
@@ -322,7 +328,7 @@ function validate(data) {
           (item.service.pickupFreight !== undefined && !amount(item.service.pickupFreight))))) {
       throw Error('记录无效或 IMEI / 物品编号重复，请检查日期和设备信息');
     }
-    ids.add(item.id); imeis.add(item.imei); serials.add(item.serial.toUpperCase());
+    ids.add(item.id); imeis.add(item.imei);
   }
   return data;
 }
@@ -476,7 +482,7 @@ function card(item, showProfit = page === 'profit') {
     (service.state === 'open' ? action(returned ? '标记处理完成' : '确认收回并完成','completeService',item,'primary') : '') +
     action('删除售后','deleteService',item,'danger');
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><div class="record-tags">${item.problem === true && (page === 'stock' || page === 'inbound') ? '<span class="tag problem-tag">问题机</span>' : ''}<span class="tag${statusStyle}" title="${states[status(item)]}">${statusLabel}</span></div></div>
-    <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(item.serial)}</p>
+    <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(itemCode(item.serial))}</p>
     <p>成本 ${money(item.cost)} ${escape(item.channel || '')}</p>
     ${saleInfo}${tracking}${saleAddress}${profitInfo}${serviceInfo}${historyInfo}${page !== 'service' && item.note ? `<p class="muted">${escape(item.note)}</p>` : ''}
     ${item.archived ? '' : `<div class="actions">${buttons}</div>`}</article>`;
@@ -533,7 +539,7 @@ function renderOutboundEntry(entry) {
   if (!entry.pair) return card(entry.item);
   const {original,snapshot,replacement} = entry.pair;
   const originalView = original ? card(original,false) : `<article><h3>${escape(snapshot?.model)} ${escape(snapshot?.capacity)}</h3>
-    <p class="muted">物品编号 ${escape(snapshot?.serial)} · IMEI ${escape(snapshot?.imei)}</p>
+    <p class="muted">物品编号 ${escape(itemCode(snapshot?.serial))} · IMEI ${escape(snapshot?.imei)}</p>
     <p>出库 ${escape(snapshot?.date)} · 售价 ${money(snapshot?.price ?? 0)}</p>
     ${snapshot?.tracking ? `<p class="muted">单号 ${escape(snapshot.tracking)}</p>` : ''}</article>`;
   return `<article class="exchange-pair"><header><h3>换货关联</h3></header>
@@ -545,6 +551,7 @@ function render() {
   $('heading').textContent = names[page];
   const addLabel = {stock:'＋ 入库',inbound:'＋ 录入',sold:'＋ 直接出库'};
   $('add').hidden = !addLabel[page];
+  $('batchInboundOpen').hidden = page !== 'inbound';
   $('add').textContent = addLabel[page] || '';
   const pendingCount = items.filter(needsTracking).length;
   $('tabs').innerHTML = Object.entries(names).map(([code,label]) => {
@@ -689,7 +696,7 @@ function renderExchangeOriginals() {
   $('exchangeOriginalResults').innerHTML = candidates.map(item => `<label class="exchange-option">
     <input type="radio" name="exchangeChoice" value="${escape(exchangeChoiceKey(item))}"${exchangeChoiceKey(item) === chosen ? ' checked' : ''}>
     <span><strong>${escape(item.model)} ${escape(item.capacity)}</strong> · ${escape(item.sale.date)}<br>
-    原单售价 ${money(item.sale.price)} · 物品编号 ${escape(item.serial)} · 单号 ${escape(item.sale.tracking || '—')}
+    原单售价 ${money(item.sale.price)} · 物品编号 ${escape(itemCode(item.serial))} · 单号 ${escape(item.sale.tracking || '—')}
     ${salePhones(item.sale).map(phone => ' · 手机尾号 '+phone.slice(-4)).join('')}</span></label>`
   ).join('') || `<p class="muted">${query ? '没有找到可关联的出库单。' : '输入手机号或快递单号后查找。'}</p>`;
   if (group && !chosen) $('exchangeOriginalResults').insertAdjacentHTML('afterbegin','<p class="muted">已关联历史原单。可保留原关联，或重新选择一笔。</p>');
@@ -762,7 +769,7 @@ function openForm(next,item) {
     html += customChoice('model','型号',['原机','原机Wi-Fi'],item?.model,'原机') +
       choice('capacity','容量',['32','128','256'],item?.capacity,'128') +
       field('imei','IMEI',item?.imei,'required inputmode="numeric"') +
-      itemCodeField(item?.serial) +
+      itemCodeField(item?.serial ? itemCode(item.serial) : '') +
       amount('cost','成本（元）',item?.cost) +
       customChoice('channel','进货渠道',['拍机堂'],item?.channel,'拍机堂');
     if (mode === 'device' && (!item || item.inbound)) html += field('inbound','入库日期',item?.inbound || today(),'required','date');
@@ -822,7 +829,7 @@ $('form').addEventListener('submit',event => {
   if (mode === 'device' || mode === 'direct') {
     for (const [name,pattern,message] of [
       ['imei',imeiPattern,'IMEI 必须是 15 位数字。'],
-      ['serial',itemNumberPattern,'物品编号必须是 20 位数字。']
+      ['serial',itemNumberPattern,'物品编码不符，请输入 4 位或 20 位数字。']
     ]) {
       if (pattern.test(values[name] ?? '')) continue;
       alert(message);
@@ -834,7 +841,7 @@ $('form').addEventListener('submit',event => {
   try {
     const item = selected ? {...selected} : {id:crypto.randomUUID(),inbound:null};
     if (mode === 'device' || mode === 'direct') Object.assign(item,{
-      model:values.model === '其他' ? values.modelCustom || '其他' : values.model, capacity:values.capacity, imei:values.imei, serial:values.serial, problem:values.problem === 'on',
+      model:values.model === '其他' ? values.modelCustom || '其他' : values.model, capacity:values.capacity, imei:values.imei, serial:itemCode(values.serial), problem:values.problem === 'on',
       cost:Math.round(Number(values.cost)*100), channel:values.channel === '其他' ? values.channelCustom || '其他' : values.channel, note:values.note, inbound:mode === 'direct' ? null : values.inbound || item.inbound
     });
     if (mode === 'sell' && status(item) === 'returned') {
@@ -901,7 +908,7 @@ function openBatchTracking() {
   $('batchTrackingRows').innerHTML = pending.map(item => `<article class="batch-tracking-order">
     <h3>${escape(item.model)} ${escape(item.capacity)}</h3>
     <p class="muted">${escape(item.sale.date)} · ${escape(item.sale.channel || '未填写销售渠道')} · ${money(salePrice(item.sale))}</p>
-    <p class="muted">物品编号 ${escape(item.serial)} · IMEI ${escape(item.imei)}</p>
+    <p class="muted">物品编号 ${escape(itemCode(item.serial))} · IMEI ${escape(item.imei)}</p>
     ${item.sale.address ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(item.sale.address)}</p></details>` : ''}
     ${field(item.id,'快递单号','','maxlength="100" autocapitalize="off" spellcheck="false"')}
   </article>`).join('');
@@ -1020,7 +1027,7 @@ function createBarcodeDecoder(Reader) {
     context.drawImage(source,-width/2,-height/2,width,height);
     try {
       const value = reader.decodeFromCanvas(canvas).getText().trim();
-      return itemNumberPattern.test(value) ? value : '';
+      return itemNumberPattern.test(value) ? itemCode(value) : '';
     } catch (error) {
       if (error instanceof TypeError) throw error;
       return ''; // No readable barcode in this frame.
@@ -1061,7 +1068,7 @@ async function openScan() {
     const decode = createBarcodeDecoder(Reader);
     const started = Date.now();
     let rotation = 0;
-    status.textContent = '将 20 位物品编号的条码放在框内，横竖都可以。';
+    status.textContent = '将物品编号的条码放在框内，横竖都可以。';
     const scanFrame = () => {
       if (scanSession !== session) return;
       try {
@@ -1120,7 +1127,7 @@ $('scanPhoto').onchange = async event => {
       const value = decode(photo,width,height,rotation);
       if (value) { fillScannedCode(value); return; }
     }
-    status.textContent = '照片里没有识别到 20 位物品编号，试试裁到只剩一张清晰的标签。';
+    status.textContent = '照片里没有识别到物品编号，试试裁到只剩一张清晰的标签。';
   } catch {
     if (scanSession === session && session.readingPhoto === attempt) {
       status.textContent = '无法识别这张照片，请换一张或手动填写。';
@@ -1167,6 +1174,120 @@ $('tabs').onclick = event => {
   if (button) tab(button.dataset.tab);
 };
 $('add').onclick = () => openForm(page === 'sold' ? 'direct' : 'device');
+let batchRows = [];
+let batchAttempt = 0;
+let ocrLibrary;
+
+function showBatchRows() {
+  $('batchRows').innerHTML = batchRows.map((row,index) => `<article>
+    <div class="row"><h3>第 ${index+1} 条</h3><button type="button" data-batch-remove="${index}">移除</button></div>
+    <div class="fields">
+      <label>IMEI<input name="imei" inputmode="numeric" value="${escape(row.imei)}"></label>
+      <label>物品编号后四位<input name="serial" inputmode="numeric" value="${escape(row.serial)}"></label>
+      <label>成本（元）<input name="cost" type="number" min="0" step="0.01" value="${escape(row.cost)}"></label>
+      <label>型号<input name="model" value="${escape(row.model)}"></label>
+      <label>容量<input name="capacity" value="${escape(row.capacity)}"></label>
+    </div>
+  </article>`).join('');
+}
+
+function readBatchRows() {
+  return [...$('batchRows').querySelectorAll('article')].map(article => {
+    const value = name => article.querySelector('[name="'+name+'"]').value.trim();
+    return {imei:value('imei'),serial:value('serial'),cost:value('cost'),model:value('model'),capacity:value('capacity')};
+  });
+}
+
+function parseInboundImage(text) {
+  return text.split(/\r?\n/).flatMap(line => {
+    const numbers = [...line.matchAll(/\d+/g)].map(match => ({value:match[0],index:match.index}));
+    const imei = numbers.find(number => number.value.length >= 10);
+    if (!imei) return [];
+    const following = numbers.filter(number => number.index > imei.index);
+    const code = following.at(-1);
+    const costs = following.slice(0,-1);
+    const cost = costs.at(-1);
+    const modelText = line.slice(imei.index+imei.value.length,cost?.index ?? code?.index ?? line.length);
+    const capacity = modelText.match(/(?:32|128|256)/)?.[0] ?? '128';
+    return [{imei:imei.value,serial:code?.value ?? '',cost:cost?.value ?? '',model:'原机',capacity}];
+  });
+}
+
+function loadOcr() {
+  if (!ocrLibrary) ocrLibrary = new Promise((resolve,reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+    script.onload = () => window.Tesseract ? resolve(window.Tesseract) : reject(Error('识别组件不可用'));
+    script.onerror = () => {script.remove(); reject(Error('识别组件加载失败，请检查网络后重试'));};
+    document.head.append(script);
+  }).catch(error => {ocrLibrary = null; throw error;});
+  return ocrLibrary;
+}
+
+$('batchInboundOpen').onclick = () => {
+  batchRows = [];
+  $('batchImage').value = '';
+  $('batchStatus').textContent = '';
+  showBatchRows();
+  $('batchInbound').showModal();
+};
+$('batchClose').onclick = () => {batchAttempt++; $('batchInbound').close();};
+$('batchInbound').addEventListener('close',() => {batchAttempt++;});
+$('batchAddRow').onclick = () => {
+  batchRows = readBatchRows();
+  batchRows.push({imei:'',serial:'',cost:'',model:'原机',capacity:'128'});
+  showBatchRows();
+};
+$('batchRows').onclick = event => {
+  const button = event.target.closest('[data-batch-remove]');
+  if (!button) return;
+  batchRows = readBatchRows();
+  batchRows.splice(Number(button.dataset.batchRemove),1);
+  showBatchRows();
+};
+$('batchImage').onchange = async event => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const attempt = ++batchAttempt;
+  event.target.value = '';
+  $('batchStatus').textContent = '正在识别图片，请稍候…';
+  try {
+    const ocr = await loadOcr();
+    const result = await ocr.recognize(file,'eng');
+    if (attempt !== batchAttempt || !$('batchInbound').open) return;
+    const recognized = parseInboundImage(result.data.text);
+    batchRows = [...readBatchRows(),...recognized];
+    showBatchRows();
+    $('batchStatus').textContent = recognized.length
+      ? '识别完成，请逐行核对并补全信息。' : '未识别到表格行，请换清晰图片或手动添加。';
+  } catch (error) {
+    if (attempt === batchAttempt) $('batchStatus').textContent = error.message || '识别失败，请重新选择图片。';
+  }
+};
+$('batchForm').onsubmit = event => {
+  event.preventDefault();
+  const rows = readBatchRows();
+  if (!rows.length) {alert('请先上传图片或添加入库记录。'); return;}
+  const used = new Set(items.map(item => item.imei));
+  const next = [];
+  for (const [index,row] of rows.entries()) {
+    if (!imeiPattern.test(row.imei)) {alert('第 '+(index+1)+' 条 IMEI 必须是 15 位数字。'); return;}
+    if (!itemNumberPattern.test(row.serial)) {alert('第 '+(index+1)+' 条物品编码不符，请输入 4 位或 20 位数字。'); return;}
+    if (used.has(row.imei)) {alert('第 '+(index+1)+' 条 IMEI 已存在或重复。'); return;}
+    if (!row.model || !row.capacity || !row.cost || !Number.isFinite(Number(row.cost)) || Number(row.cost)<0) {
+      alert('请补全第 '+(index+1)+' 条的型号、容量和成本。'); return;
+    }
+    used.add(row.imei);
+    next.push({id:crypto.randomUUID(),model:row.model,capacity:row.capacity,imei:row.imei,
+      serial:itemCode(row.serial),cost:Math.round(Number(row.cost)*100),channel:'拍机堂',
+      inbound:today(),problem:false,note:''});
+  }
+  try {
+    save([...items,...next],'批量入库','共 '+next.length+' 台');
+    $('batchInbound').close();
+    tab('inbound');
+  } catch (error) {alert(error.message);}
+};
 $('cancel').onclick = () => $('editor').close();
 $('query').oninput = render;
 $('filter').onchange = render;
@@ -1186,7 +1307,7 @@ $('reset').onclick = () => {
 };
 function describeItem(item) {
   const tracking = item.sale?.tracking;
-  return item.model+' · 物品编号 '+item.serial+(tracking ? ' · 单号 '+tracking : '');
+  return item.model+' · 物品编号 '+itemCode(item.serial)+(tracking ? ' · 单号 '+tracking : '');
 }
 document.addEventListener('click',event => {
   if (!$('more').contains(event.target)) $('more').open = false;
