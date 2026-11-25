@@ -6,6 +6,9 @@
 <style>
 :root{font:16px system-ui,-apple-system,sans-serif;color:#172d49;background:#f2f6fc;--blue:#174a92;--line:#d7e2f2}
 *{box-sizing:border-box}body{margin:0}main{max-width:780px;margin:auto;padding:24px 16px 110px}button,input,select,textarea{font:inherit}button,select{cursor:pointer}button{min-height:44px;border:0;border-radius:12px;padding:8px 13px;background:#e6eefb;color:var(--blue);font-weight:650}button.primary{background:var(--blue);color:white}header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:8px}.actions{justify-content:flex-start;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:21px;margin:0}h3{font-size:17px;margin:0}p{margin:8px 0}small,.muted{color:#4c607c}.hero{margin:22px 0;background:var(--blue);color:white;border-radius:22px;padding:20px}.hero small{color:#dbeaff}.metrics,.fields,.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metrics{margin-top:14px}.metric{padding:12px;background:#ffffff18;border-radius:12px;overflow-wrap:anywhere}.metric strong{display:block;font-size:20px;margin-top:5px}.filters{margin:14px 0}.wide{grid-column:1/-1}label{display:grid;gap:5px;font-size:14px}input,select,textarea{width:100%;min-width:0;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px;background:white;color:inherit;font-size:16px}article,.empty{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin:8px 0;overflow-wrap:anywhere}.group{margin-top:18px}.tag{background:#e6eefb;padding:4px 8px;border-radius:20px;font-size:13px;white-space:nowrap}nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:1}nav div{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;max-width:780px;margin:auto}nav button{background:white;padding:5px}nav button[aria-current=true]{background:#d9e8ff}dialog{border:0;border-radius:18px;width:min(94vw,520px);max-height:90dvh;padding:18px;color:inherit}dialog::backdrop{background:#102b50aa}dialog .actions{margin-top:14px}#notice{color:#9a301e}output{display:block}.danger{color:#983727}
+.stock-group{background:white;border:1px solid var(--line);border-radius:16px;margin:10px 0;padding:12px}
+.stock-group>summary{cursor:pointer;color:var(--blue);font-weight:700;padding:3px}
+.stock-group>.group{margin:10px 0 0}
 .profit-day-controls{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin-top:12px}
 .profit-day-controls label{flex:1 0 152px;max-width:220px}
 .profit-day-controls input{color:#172d49}
@@ -226,6 +229,16 @@
     <div class="actions"><button class="primary" type="submit">保存已填单号</button><button id="batchTrackingCancel" type="button">取消</button></div>
   </form>
 </dialog>
+<dialog id="stockColorDialog">
+  <h2>分配颜色</h2>
+  <form id="stockColorForm">
+    <label>颜色<select id="stockColor" name="color">
+      <option value="">未分配颜色</option>
+      <option>黑色</option><option>金色</option><option>粉色</option><option>银色</option><option>红色</option>
+    </select></label>
+    <div class="actions"><button class="primary" type="submit">保存</button><button type="button" id="stockColorCancel">取消</button></div>
+  </form>
+</dialog>
 <dialog id="editor"><h2 id="formTitle"></h2><form id="form"><div id="fields" class="fields"></div><output id="notice" role="alert"></output><div class="actions"><button class="primary">保存</button><button type="button" id="cancel">取消</button></div></form></dialog>
 <dialog id="batchInbound"><h2>一键入库</h2>
 <p>上传表格图片，核对识别出的 IMEI、成本和物品编号。默认型号为原机、容量为 128，进货渠道为拍机堂。</p>
@@ -278,6 +291,9 @@ const needsTracking = item => activeSale(item) && !String(item.sale.tracking ?? 
 const imeiPattern = /^\d{15}$/;
 const itemNumberPattern = /^\d{4}$|^\d{20}$/;
 const itemCode = value => String(value ?? '').slice(-4);
+const stockColors = ['黑色','金色','粉色','银色','红色'];
+const openStockGroups = new Set();
+let stockColorId = null;
 let page = 'stock';
 let storageError = false;
 let source = null;
@@ -474,6 +490,10 @@ function card(item, showProfit = page === 'profit') {
     if (inStock(item)) buttons += action('标记售出','sell',item,'primary');
     if (!item.sale && !item.history?.length) buttons += action('删除','deleteDevice',item,'danger');
   }
+  if (page === 'stock') {
+    buttons += action('分配颜色','stockColor',item) +
+      action(item.problem === true ? '取消问题机' : '标记问题机','stockProblem',item);
+  }
   if (page === 'sold') {
     buttons = action('编辑','saleEdit',item) + action(item.service ? '编辑售后' : '转售后','service',item);
     if (!item.service) buttons += action('删除出库','deleteSale',item,'danger');
@@ -483,7 +503,7 @@ function card(item, showProfit = page === 'profit') {
     action('删除售后','deleteService',item,'danger');
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><div class="record-tags">${item.problem === true && (page === 'stock' || page === 'inbound') ? '<span class="tag problem-tag">问题机</span>' : ''}<span class="tag${statusStyle}" title="${states[status(item)]}">${statusLabel}</span></div></div>
     <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(itemCode(item.serial))}</p>
-    <p>成本 ${money(item.cost)} ${escape(item.channel || '')}</p>
+    <p>成本 ${money(item.cost)} ${escape(item.channel || '')}${item.color ? ' · '+escape(item.color) : ''}</p>
     ${saleInfo}${tracking}${saleAddress}${profitInfo}${serviceInfo}${historyInfo}${page !== 'service' && item.note ? `<p class="muted">${escape(item.note)}</p>` : ''}
     ${item.archived ? '' : `<div class="actions">${buttons}</div>`}</article>`;
 }
@@ -595,8 +615,29 @@ function render() {
   </details>
     <button type="button" class="batch-tracking-trigger" data-batch-tracking>一键填入单号</button>
   </div>` : '';
-  records.innerHTML = (pendingSection + renderRecordGroups(regular,cost)) || '<p class="empty">'+
-    (storageError ? '本机数据无法读取，请从有效备份恢复。' : profitDay ? '当天暂无符合条件的出库记录。' : '暂无符合条件的记录。')+'</p>';
+  if (page === 'stock' && !storageError) {
+    records.innerHTML = renderStockGroups(regular,cost,Boolean(query));
+  } else {
+    records.innerHTML = (pendingSection + renderRecordGroups(regular,cost)) || '<p class="empty">'+
+      (storageError ? '本机数据无法读取，请从有效备份恢复。' : profitDay ? '当天暂无符合条件的出库记录。' : '暂无符合条件的记录。')+'</p>';
+  }
+}
+
+function renderStockGroups(entries,cost,searching) {
+  const names = [...stockColors,'未分配颜色','问题机'];
+  return names.map(name => {
+    const members = entries.filter(entry => {
+      const item = entry.item;
+      if (name === '问题机') return item.problem === true;
+      if (item.problem === true) return false;
+      return name === '未分配颜色' ? !stockColors.includes(item.color) : item.color === name;
+    });
+    const expanded = searching && members.length > 0 || openStockGroups.has(name);
+    const label = name === '问题机' ? '问题机' : name;
+    const contents = members.length ? renderRecordGroups(members,cost) : '<p class="muted">暂无记录</p>';
+    return `<details class="stock-group" data-stock-group="${escape(name)}"${expanded ? ' open' : ''}>
+      <summary>${label} · ${members.length} 台</summary>${contents}</details>`;
+  }).join('');
 }
 
 function renderRecordGroups(rows,cost) {
@@ -935,6 +976,29 @@ $('batchTrackingForm').onsubmit = event => {
   }
 };
 
+$('stockColorCancel').onclick = () => $('stockColorDialog').close();
+$('stockColorForm').onsubmit = event => {
+  event.preventDefault();
+  const item = items.find(row => row.id === stockColorId);
+  const color = $('stockColor').value;
+  if (!item || (color && !stockColors.includes(color))) {
+    alert('设备或颜色无效，请重新操作。');
+    return;
+  }
+  try {
+    save(items.map(row => row.id === item.id ? {...row,color} : row),
+      '分配颜色',describeItem(item)+' · '+(color || '未分配颜色'));
+    openStockGroups.add(item.problem ? '问题机' : color || '未分配颜色');
+    $('stockColorDialog').close();
+    render();
+  } catch (error) { alert(error.message); }
+};
+$('records').addEventListener('toggle',event => {
+  const group = event.target;
+  if (!group.matches('details[data-stock-group]')) return;
+  if (group.open) openStockGroups.add(group.dataset.stockGroup);
+  else openStockGroups.delete(group.dataset.stockGroup);
+},true);
 $('records').addEventListener('click',event => {
   if (event.target.closest('button[data-batch-tracking]')) {
     openBatchTracking();
@@ -944,6 +1008,25 @@ $('records').addEventListener('click',event => {
   if (!button) return;
   const item = items.find(row => row.id === button.dataset.id);
   const command = button.dataset.command;
+  if (command === 'stockColor') {
+    if (!item) return;
+    stockColorId = item.id;
+    $('stockColor').value = stockColors.includes(item.color) ? item.color : '';
+    $('stockColorDialog').showModal();
+    return;
+  }
+  if (command === 'stockProblem') {
+    if (!item) return;
+    try {
+      const problem = item.problem !== true;
+      save(items.map(row => row.id === item.id ? {...row,problem} : row),
+        problem ? '标记问题机' : '取消问题机',describeItem(item));
+      if (problem) openStockGroups.add('问题机');
+      else openStockGroups.add(stockColors.includes(item.color) ? item.color : '未分配颜色');
+      render();
+    } catch (error) { alert(error.message); }
+    return;
+  }
   if (command === 'completeService') {
     if (item?.service?.state !== 'open') return;
     try {
