@@ -262,7 +262,8 @@ const exchangeProgressOptions = {
   waitingNew:'新机未寄出，旧机已取回'
 };
 const returnProgressOptions = {waitingReturn:'待寄回',returnSent:'已寄回',returnReceived:'已收到退货'};
-const serviceProgressOptions = {...exchangeProgressOptions,...returnProgressOptions};
+const repairProgressOptions = {repairWaiting:'待寄回',repairReceived:'已收回，维修中',repairSent:'维修完成，已寄出'};
+const serviceProgressOptions = {...exchangeProgressOptions,...returnProgressOptions,...repairProgressOptions};
 const serviceReasonLabel = (kind,quality) => quality === 'quality'
   ? '质量问题'+kind : '无质量问题'+kind+'（可直接售卖）';
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
@@ -270,7 +271,7 @@ const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).
 const money = cents => '¥' + (cents/100).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const serviceReceivedDate = service => service.receivedOn ?? service.date;
 function receivedFromService(service) {
-  if (!service) return false;
+  if (!service || service.reason === '维修') return false;
   const progress = service.progress ?? service.exchangeStatus;
   return service.state === 'returned' ||
     (service.reason === '换货' && ['sentReceived','waitingNew'].includes(progress)) ||
@@ -425,10 +426,12 @@ function saleCharges(item) {
   const {rate:freight,region} = regionalFreight(originalSale?.address || item.sale.address);
   const exchange = Boolean(item.sale.exchangeFor) || item.service?.reason === '换货';
   const refund = item.service?.reason === '退货' || (status(item) === 'returned' && item.service.reason !== '换货');
-  const resend = exchange ? regionalFreight(item.sale.address || originalSale?.address) : {rate:0};
+  const repair = item.service?.reason === '维修';
+  const resend = (exchange || (repair && item.service?.repairTracking)) ? regionalFreight(item.sale.address || originalSale?.address) : {rate:0};
   const exchangePickup = exchange ? pickupFreight(item.sale.exchangeFor ? original?.service : item.service) : 0;
   const returnPickup = refund ? pickupFreight(item.service) : 0;
-  const serviceFreight = resend.rate + exchangePickup + returnPickup;
+  const repairPickup = repair ? pickupFreight(item.service) : 0;
+  const serviceFreight = resend.rate + exchangePickup + returnPickup + repairPickup;
   const channel = originalSale?.channel ?? item.sale.channel;
   const price = salePrice(item.sale);
   const effective = activeSale(item);
@@ -474,10 +477,11 @@ function card(item, showProfit = page === 'profit') {
   const service = item.service;
   const progress = service?.progress ?? service?.exchangeStatus;
   const serviceInfo = service && page === 'service' ? `
-    <p>${escape(service.quality ? serviceReasonLabel(service.reason,service.quality) : service.reason)}</p>
+    <p>${escape(service.reason === '维修' ? '维修 · '+(service.repairReason || '') : service.quality ? serviceReasonLabel(service.reason,service.quality) : service.reason)}</p>
     ${service.returnTracking ? `<p class="muted">寄回单号 ${escape(service.returnTracking)}</p>` : ''}
+    ${service.repairTracking ? `<p class="muted">维修寄出单号 ${escape(service.repairTracking)} · 寄出运费 ${money(regionalFreight(item.sale?.address).rate)}</p>` : ''}
     ${service.exchangeTracking ? `<p class="muted">换货单号 ${escape(service.exchangeTracking)}</p>` : ''}
-    ${['换货','退货'].includes(service.reason) ? `<p class="muted">${service.reason === '换货' ? '旧机' : '退货'}取回运费 ${money(pickupFreight(service))}</p>` : ''}
+    ${['换货','退货','维修'].includes(service.reason) ? `<p class="muted">${service.reason === '换货' ? '旧机' : '退货'}取回运费 ${money(pickupFreight(service))}</p>` : ''}
     ${Object.hasOwn(serviceProgressOptions,progress) ? `<p class="muted">处理进度 ${serviceProgressOptions[progress]}</p>` : ''}
     ` : '';
   const returned = status(item) === 'returned';
@@ -499,7 +503,7 @@ function card(item, showProfit = page === 'profit') {
     if (!item.service) buttons += action('删除出库','deleteSale',item,'danger');
   }
   if (page === 'service') buttons = action('编辑 / 标记进度','service',item) +
-    (service.state === 'open' ? action(returned ? '标记处理完成' : '确认收回并完成','completeService',item,'primary') : '') +
+    (service.state === 'open' ? action(service.reason === '维修' ? '填写寄出单号并完成' : returned ? '标记处理完成' : '确认收回并完成',service.reason === '维修' ? 'service' : 'completeService',item,'primary') : '') +
     action('删除售后','deleteService',item,'danger');
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><div class="record-tags">${item.problem === true && (page === 'stock' || page === 'inbound') ? '<span class="tag problem-tag">问题机</span>' : ''}<span class="tag${statusStyle}" title="${states[status(item)]}">${statusLabel}</span></div></div>
     <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(itemCode(item.serial))}</p>
@@ -531,7 +535,7 @@ function matchesOrderIdentifier(value,query) {
 function matchesInventorySearch(item,query,includeHistory = true) {
   const values = [item.serial,item.imei];
   for (const {sale,service} of includeHistory ? [item,...(item.history ?? [])] : [item]) {
-    values.push(sale?.tracking,service?.returnTracking,service?.exchangeTracking,...salePhones(sale),
+    values.push(sale?.tracking,service?.returnTracking,service?.exchangeTracking,service?.repairTracking,...salePhones(sale),
       sale?.originalSale?.tracking,sale?.originalSale?.serial,sale?.originalSale?.imei,...salePhones(sale?.originalSale));
   }
   return values.some(value => matchesOrderIdentifier(value,query));
@@ -698,9 +702,17 @@ function syncServiceProgress() {
   const kind = fields.namedItem('reason').value;
   const quality = fields.namedItem('quality');
   const progress = fields.namedItem('progress');
-  const progressOptions = kind === '换货' ? exchangeProgressOptions : returnProgressOptions;
+  const progressOptions = kind === '换货' ? exchangeProgressOptions : kind === '维修' ? repairProgressOptions : returnProgressOptions;
   const currentProgress = progress.value || progress.dataset.saved || '';
   $('serviceReasonLabel').textContent = kind ? kind+'原因' : '具体原因';
+  $('serviceQuality').hidden = kind === '维修';
+  quality.disabled = kind === '维修';
+  $('serviceRepairReason').hidden = kind !== '维修';
+  fields.namedItem('repairReason').disabled = kind !== '维修';
+  $('serviceRepairTracking').hidden = kind !== '维修';
+  fields.namedItem('repairTracking').disabled = kind !== '维修';
+  fields.namedItem('state').querySelector('option[value="returned"]').hidden = kind === '维修';
+  if (kind === '维修' && fields.namedItem('state').value === 'returned') fields.namedItem('state').value = 'open';
   for (const value of ['quality','clear']) {
     quality.querySelector(`option[value="${value}"]`).textContent = serviceReasonLabel(kind,value);
   }
@@ -711,7 +723,7 @@ function syncServiceProgress() {
   $('serviceExchangeTracking').hidden = kind !== '换货';
   fields.namedItem('exchangeTracking').disabled = kind !== '换货';
   $('pickupFreightLabel').textContent = kind === '退货' ? '退货取回运费（元）' : '旧机取回运费（元）';
-  fields.namedItem('note').required = quality.value === 'quality';
+  fields.namedItem('note').required = kind !== '维修' && quality.value === 'quality';
 }
 
 function canLinkOriginal(item,existingGroup) {
@@ -832,16 +844,18 @@ function openForm(next,item) {
   if (mode === 'service') {
     html = field('date','售后日期',service?.date || today(),'required','date') +
       `<label>售后类型<select name="reason" required><option value="" disabled>请选择类型</option>
-        ${['换货','退货'].map(reason => `<option ${service?.reason === reason ? 'selected' : ''}>${reason}</option>`).join('')}</select></label>
-      <label class="wide"><span id="serviceReasonLabel">具体原因</span><select name="quality" required>
+        ${['换货','退货','维修'].map(reason => `<option ${service?.reason === reason ? 'selected' : ''}>${reason}</option>`).join('')}</select></label>
+      <label class="wide" id="serviceQuality"><span id="serviceReasonLabel">具体原因</span><select name="quality" required>
         <option value="">请选择原因</option>
         <option value="quality"${service?.quality === 'quality' ? ' selected' : ''}></option>
         <option value="clear"${service?.quality === 'clear' ? ' selected' : ''}></option>
       </select></label>
+      <label class="wide" id="serviceRepairReason" hidden>维修原因<input name="repairReason" value="${escape(service?.repairReason)}" maxlength="500"></label>
       <label class="wide">处理状态<select name="state">${['open','closed','returned'].map(state =>
         `<option value="${state}" ${service?.state === state ? 'selected' : ''}>${states[state]}</option>`).join('')}</select></label>
       <label class="wide">处理进度<select name="progress" data-saved="${escape(service?.progress ?? service?.exchangeStatus)}"></select></label>` +
       field('returnTracking','寄回单号',service?.returnTracking,'maxlength="100" autocapitalize="off"') +
+      `<div id="serviceRepairTracking" hidden>${field('repairTracking','维修寄出单号',service?.repairTracking,'maxlength="100" autocapitalize="off"')}</div>` +
       `<div id="serviceExchangeTracking">${field('exchangeTracking','换货单号',service?.exchangeTracking,'maxlength="100" autocapitalize="off"')}</div>` +
       `<label class="wide"><span id="pickupFreightLabel">旧机取回运费（元）</span>
         <input name="pickupFreight" type="number" inputmode="decimal" min="0" max="999999999.99" step="0.01" required value="${pickupFreight(service)/100}"></label>` +
@@ -853,7 +867,7 @@ function openForm(next,item) {
     syncCustomChoice(select);
   }
   if (mode === 'service') {
-    if (!['换货','退货'].includes(service?.reason)) $('form').elements.namedItem('reason').value = '';
+    if (!['换货','退货','维修'].includes(service?.reason)) $('form').elements.namedItem('reason').value = '';
     syncServiceProgress();
   }
   if (selling) {
@@ -918,12 +932,15 @@ $('form').addEventListener('submit',event => {
     }
     if (mode === 'service') {
       const {date,reason,quality,state,progress,note,returnTracking,exchangeTracking} = values;
-      const progressOptions = reason === '换货' ? exchangeProgressOptions : returnProgressOptions;
-      if (!['换货','退货'].includes(reason) || !['quality','clear'].includes(quality) ||
+      const progressOptions = reason === '换货' ? exchangeProgressOptions : reason === '维修' ? repairProgressOptions : returnProgressOptions;
+      if (!['换货','退货','维修'].includes(reason) || (reason !== '维修' && !['quality','clear'].includes(quality)) || (reason === '维修' && state === 'returned') ||
           !['open','closed','returned'].includes(state) ||
           (progress && !Object.hasOwn(progressOptions,progress))) {
         throw Error('请选择售后类型、原因和处理状态。');
       }
+      if (reason === '维修' && !values.repairReason) throw Error('请填写维修原因。');
+      if (reason === '维修' && !returnTracking) throw Error('请填写寄回单号。');
+      if (reason === '维修' && (state === 'closed' || progress === 'repairSent') && !values.repairTracking) throw Error('请填写维修寄出单号。');
       if (quality === 'quality' && !note) throw Error('质量问题请填写备注。');
       item.service = {date,reason,quality,state,progress,note,returnTracking,
         pickupFreight:Math.round(Number(values.pickupFreight)*100)};
@@ -933,6 +950,7 @@ $('form').addEventListener('submit',event => {
         item.service.receivedOn = confirmationDate < date ? date : confirmationDate;
       }
       if (reason === '换货') item.service.exchangeTracking = exchangeTracking;
+      if (reason === '维修') { item.service.repairReason = values.repairReason; item.service.repairTracking = values.repairTracking || ''; }
     }
     const actionName = mode === 'service'
       ? (selected?.service ? '更新售后 · ' : '新增售后 · ')+values.reason+' · '+states[item.service.state]
