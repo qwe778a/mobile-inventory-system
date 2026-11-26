@@ -55,7 +55,7 @@
 #paymentList strong{white-space:nowrap}
 #paymentList h3{min-width:0}
 #tabs button[data-tab="sold"]{position:relative;padding-inline:17px}
-.pending-count{display:inline-grid;place-items:center;min-width:20px;padding:2px 5px;border-radius:20px;background:#087642;color:white;font-size:11px;font-weight:700;line-height:16px;font-variant-numeric:tabular-nums}
+.service-pending-count{background:#c62828!important}.pending-count{display:inline-grid;place-items:center;min-width:20px;padding:2px 5px;border-radius:20px;background:#087642;color:white;font-size:11px;font-weight:700;line-height:16px;font-variant-numeric:tabular-nums}
 #tabs .pending-count{position:absolute;top:2px;right:2px;transform:translateX(20%);pointer-events:none}
 .pending-shipments{margin:0 0 14px;border:1px solid var(--line);border-radius:14px;background:white}
 .pending-shipments>summary{padding:12px;min-height:44px;color:var(--blue);cursor:pointer;font-weight:700}
@@ -575,9 +575,9 @@ function render() {
   $('add').textContent = addLabel[page] || '';
   const pendingCount = items.filter(needsTracking).length;
   $('tabs').innerHTML = Object.entries(names).map(([code,label]) => {
-    const showCount = code === 'sold' && pendingCount > 0;
-    const badge = showCount ? `<span class="pending-count" aria-hidden="true">${pendingCount}</span>` : '';
-    const description = showCount ? ` aria-label="出库，${pendingCount} 单未填单号"` : '';
+    const count = code === 'sold' ? pendingCount : code === 'service' ? items.filter(item => item.service?.state === 'open').length : 0;
+    const badge = count ? `<span class="pending-count${code === 'service' ? ' service-pending-count' : ''}" aria-hidden="true">${count}</span>` : '';
+    const description = count ? ` aria-label="${code === 'service' ? '售后，'+count+' 单未完成' : '出库，'+count+' 单未填单号'}"` : '';
     return `<button data-tab="${code}" aria-current="${code === page}"${description}>${label}${badge}</button>`;
   }).join('');
   const query = $('query').value.trim().toLowerCase();
