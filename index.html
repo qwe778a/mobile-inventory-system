@@ -229,6 +229,11 @@
     <div class="actions"><button class="primary" type="submit">保存已填单号</button><button id="batchTrackingCancel" type="button">取消</button></div>
   </form>
 </dialog>
+<dialog id="stockRepairDialog"><h2>维修费用</h2><p class="muted">勾选维修项目，费用将加到设备成本。</p><form id="stockRepairForm">
+<label><span><input type="checkbox" name="part" value="battery" style="width:auto;min-height:auto"> 换电池</span><input name="battery" type="number" min="0" step="0.01" value="10" required></label>
+<label><span><input type="checkbox" name="part" value="screen" style="width:auto;min-height:auto"> 换屏幕</span><input name="screen" type="number" min="0" step="0.01" value="40" required></label>
+<label><span><input type="checkbox" name="part" value="camera" style="width:auto;min-height:auto"> 换摄像头</span><input name="camera" type="number" min="0" step="0.01" value="25" required></label>
+<output id="stockRepairNotice" role="alert"></output><div class="actions"><button class="primary">保存并计入成本</button><button type="button" id="stockRepairCancel">取消</button></div></form></dialog>
 <dialog id="stockColorDialog">
   <h2>分配颜色</h2>
   <form id="stockColorForm">
@@ -495,7 +500,7 @@ function card(item, showProfit = page === 'profit') {
     if (!item.sale && !item.history?.length) buttons += action('删除','deleteDevice',item,'danger');
   }
   if (page === 'stock') {
-    buttons += action('分配颜色','stockColor',item) +
+    buttons += action('维修','stockRepair',item) + action('分配颜色','stockColor',item) +
       action(item.problem === true ? '取消问题机' : '标记问题机','stockProblem',item);
   }
   if (page === 'sold') {
@@ -508,7 +513,7 @@ function card(item, showProfit = page === 'profit') {
   return `<article><div class="row"><h3>${escape(item.model)} ${escape(item.capacity)}</h3><div class="record-tags">${item.problem === true && (page === 'stock' || page === 'inbound') ? '<span class="tag problem-tag">问题机</span>' : ''}<span class="tag${statusStyle}" title="${states[status(item)]}">${statusLabel}</span></div></div>
     <p class="muted">IMEI ${escape(item.imei)} · 物品编号 ${escape(itemCode(item.serial))}</p>
     <p>成本 ${money(item.cost)} ${escape(item.channel || '')}${item.color ? ' · '+escape(item.color) : ''}</p>
-    ${saleInfo}${tracking}${saleAddress}${profitInfo}${serviceInfo}${historyInfo}${page !== 'service' && item.note ? `<p class="muted">${escape(item.note)}</p>` : ''}
+    ${page === 'stock' && item.stockRepairs?.length ? `<p class="muted">维修：${escape(item.stockRepairs.flatMap(r => r.parts || []).map(p => p.name+' '+money(p.cost)).join('、'))}</p>` : ''}${saleInfo}${tracking}${saleAddress}${profitInfo}${serviceInfo}${historyInfo}${page !== 'service' && item.note ? `<p class="muted">${escape(item.note)}</p>` : ''}
     ${item.archived ? '' : `<div class="actions">${buttons}</div>`}</article>`;
 }
 
@@ -1011,6 +1016,29 @@ $('stockColorForm').onsubmit = event => {
     render();
   } catch (error) { alert(error.message); }
 };
+$('stockRepairCancel').onclick = () => $('stockRepairDialog').close();
+$('stockRepairForm').onsubmit = event => {
+  event.preventDefault();
+  try {
+    const item = items.find(row => row.id === $('stockRepairDialog').dataset.id);
+    if (!item || !inStock(item)) throw Error('设备不在库存中，请刷新后重试。');
+    const f = event.currentTarget, labels = {battery:'换电池',screen:'换屏幕',camera:'换摄像头'};
+    const selected = [...f.querySelectorAll('input[name="part"]:checked')].map(input => {
+      const value = f.elements.namedItem(input.value).value;
+      if (!/^\d+(?:\.\d{1,2})?$/.test(value)) throw Error('请输入有效的维修金额，最多两位小数。');
+      const cents = Math.round(Number(value)*100);
+      if (!Number.isSafeInteger(cents) || cents > 99999999999) throw Error('维修金额超出范围。');
+      return {name:labels[input.value],cost:cents};
+    });
+    if (!selected.length) throw Error('请至少选择一项维修。');
+    const extra = selected.reduce((sum,part) => sum+part.cost,0);
+    if (!Number.isSafeInteger(item.cost+extra) || item.cost+extra > 99999999999) throw Error('成本超出范围。');
+    const repairs = [...(Array.isArray(item.stockRepairs) ? item.stockRepairs : []),{date:today(),parts:selected}];
+    save(items.map(row => row.id === item.id ? {...row,cost:row.cost+extra,stockRepairs:repairs} : row),
+      '库存维修',describeItem(item)+' · '+selected.map(p=>p.name+' '+money(p.cost)).join('，'));
+    $('stockRepairDialog').close(); render();
+  } catch (error) { $('stockRepairNotice').textContent = error.message; }
+};
 $('records').addEventListener('toggle',event => {
   const group = event.target;
   if (!group.matches('details[data-stock-group]')) return;
@@ -1026,6 +1054,11 @@ $('records').addEventListener('click',event => {
   if (!button) return;
   const item = items.find(row => row.id === button.dataset.id);
   const command = button.dataset.command;
+  if (command === 'stockRepair') {
+    if (!item || !inStock(item)) return;
+    $('stockRepairForm').reset(); $('stockRepairNotice').textContent = '';
+    $('stockRepairDialog').dataset.id = item.id; $('stockRepairDialog').showModal(); return;
+  }
   if (command === 'stockColor') {
     if (!item) return;
     stockColorId = item.id;
