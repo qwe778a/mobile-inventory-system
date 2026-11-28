@@ -469,9 +469,9 @@ function card(item, showProfit = page === 'profit') {
   const tracking = item.sale?.tracking ? `<p class="muted">单号 ${escape(item.sale.tracking)}</p>` : '';
   const saleInfo = item.sale && page !== 'stock' && page !== 'inbound'
     ? `<p>售价 ${money(salePrice(item.sale))} · ${escape(item.sale.channel || '未填写销售渠道')}</p>` : '';
-  const address = page === 'sold' ? deliveryAddress(item.sale) : '';
+  const address = ['sold','service'].includes(page) ? deliveryAddress(item.sale) : '';
   const saleAddress = address
-    ? `<details class="sale-address"><summary>收货地址</summary><p>${escape(address)}</p></details>` : '';
+    ? `<details class="sale-address"><summary>收货人、手机号和地址</summary><p>${escape(address)}</p></details>` : '';
   const charges = showProfit ? saleCharges(item) : null;
   const freightRegion = region => region || '未识别地区，按 ¥3';
   const profitInfo = charges ? `<p><strong>${charges.effective ? '实际利润 '+money(charges.net) : '售后物流支出 '+money(-charges.net)}</strong></p>
